@@ -7,7 +7,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import java.util.Arrays;
 
-@Configuration
 @ConfigurationProperties(prefix = "reddit.api")
 @Validated
 public class RedditApiConfig {
