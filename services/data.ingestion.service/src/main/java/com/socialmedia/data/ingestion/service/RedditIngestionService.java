@@ -1,8 +1,8 @@
 package com.socialmedia.data.ingestion.service;
 
-import com.socialmedia.data.ingestion.service.RedditApiClient;
-import com.socialmedia.data.ingestion.model.reddit.RedditPost;
+import com.socialmedia.data.ingestion.model.Platform;
 import com.socialmedia.data.ingestion.model.SocialPost;
+import com.socialmedia.data.ingestion.model.reddit.RedditPost;
 import com.socialmedia.data.ingestion.repository.SocialPostRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,9 +48,9 @@ public class RedditIngestionService {
                     .map(this::convertToSocialPost)
                     .collect(Collectors.toList());
                 
-                // Filter out duplicates
+                // Filter out duplicates using new method signature
                 List<SocialPost> newPosts = socialPosts.stream()
-                    .filter(post -> !socialPostRepository.existsByPostIdAndPlatform(post.getPostId(), post.getPlatform()))
+                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(post.getExternalId(), post.getPlatform()))
                     .collect(Collectors.toList());
                 
                 logger.info("Saving {} new posts (filtered {} duplicates)", 
@@ -72,19 +72,19 @@ public class RedditIngestionService {
      * 🔄 DATA CONVERSION: RedditPost → SocialPost
      */
     private SocialPost convertToSocialPost(RedditPost redditPost) {
-        // Use getSelftext() instead of getContent() - this is the correct Reddit API field
+        // Create using new constructor and Platform enum
         SocialPost socialPost = new SocialPost(
+            Platform.REDDIT,
             redditPost.getId(),
-            "REDDIT",
-            redditPost.getTitle(),
-            redditPost.getContent()
+            redditPost.getContent(),
+            redditPost.getAuthor()
         );
         
         // Set additional fields
-        socialPost.setAuthor(redditPost.getAuthor());
+        socialPost.setTitle(redditPost.getTitle());
         socialPost.setUrl(redditPost.getUrl());
-        socialPost.setScore(redditPost.getScore());
-        socialPost.setCommentCount(redditPost.getNumComments());
+        socialPost.setUpvotes(redditPost.getScore()); // Use new field name
+        socialPost.setCommentsCount(redditPost.getNumComments()); // Use new field name
         socialPost.setSubreddit(redditPost.getSubreddit());
         
         // Convert Reddit timestamp (Unix epoch) to LocalDateTime
@@ -95,6 +95,9 @@ public class RedditIngestionService {
             );
             socialPost.setCreatedAt(createdAt);
         }
+        
+        // Calculate engagement score using new method
+        socialPost.calculateEngagementScore();
         
         return socialPost;
     }
@@ -115,9 +118,9 @@ public class RedditIngestionService {
                     .map(this::convertToSocialPost)
                     .collect(Collectors.toList());
                 
-                // Filter duplicates
+                // Filter duplicates using new method signature
                 List<SocialPost> newPosts = socialPosts.stream()
-                    .filter(post -> !socialPostRepository.existsByPostIdAndPlatform(post.getPostId(), post.getPlatform()))
+                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(post.getExternalId(), post.getPlatform()))
                     .collect(Collectors.toList());
                 
                 logger.info("Saving {} new posts from batch ingestion", newPosts.size());
@@ -162,11 +165,18 @@ public class RedditIngestionService {
      */
     public IngestionStats getIngestionStats() {
         Long totalPosts = socialPostRepository.count();
-        Long redditPosts = socialPostRepository.countByPlatform("REDDIT");
         
-        // For recent posts (last 24 hours), you'd need a proper query
-        // This is a simplified version
-        Long recentPosts = socialPostRepository.countByPlatform("REDDIT"); // Simplified
+        // Use new method to count Reddit posts
+        Long redditPosts = socialPostRepository.countByPlatformSince(
+            Platform.REDDIT, 
+            LocalDateTime.now().minusYears(10) // Get all Reddit posts
+        );
+        
+        // Get recent posts (last 24 hours)
+        Long recentPosts = socialPostRepository.countByPlatformSince(
+            Platform.REDDIT, 
+            LocalDateTime.now().minusHours(24)
+        );
         
         return new IngestionStats(totalPosts, redditPosts, recentPosts, sessionIngestedCount.get());
     }
