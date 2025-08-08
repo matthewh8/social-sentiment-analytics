@@ -1,176 +1,137 @@
 package com.socialmedia.data.ingestion.model;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "social_posts")
-public class SocialPost{
-
+@Table(name = "social_posts", indexes = {
+    @Index(name = "idx_post_platform", columnList = "postId, platform"),
+    @Index(name = "idx_ingestion_time", columnList = "ingestionTime"),
+    @Index(name = "idx_created_at", columnList = "createdAt"),
+    @Index(name = "idx_platform", columnList = "platform")
+})
+public class SocialPost {
+    
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
-    @NotBlank(message = "Platform is required")
-    @Column(name = "platform", nullable = false)
-    private String platform; // "reddit", "twitter"(x), "youtube"
-
-    @NotBlank(message = "External ID is required")
-    @Column(name = "external_id", nullable = false, unique = true)
-    private String externalId; // Platform-specific post ID
-
-    @NotBlank(message = "Content is required")
-    @Size(max = 5000, message = "Content cannot exceed 5000 characters")
-    @Column(name = "content", nullable = false, length = 5000)
-    private String content;
-
-    @Column(name = "author")
-    private String author;
-
-    @Column(name = "title")
+    
+    @Column(nullable = false, length = 100)
+    private String postId;
+    
+    @Column(nullable = false, length = 20)
+    private String platform;  // REDDIT, TWITTER, etc.
+    
+    @Column(length = 500)
     private String title;
-
-    @NotNull(message = "Created date is required")
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
-
-    @Column(name = "fetched_at", nullable = false)
-    private LocalDateTime fetchedAt;
-
-    @Column(name = "upvotes")
-    private Integer upvotes;
-
-    @Column(name = "downvotes")
-    private Integer downvotes;
-
-    @Column(name = "comments_count")
-    private Integer commentsCount;
-
-    @Column(name = "url")
+    
+    @Column(columnDefinition = "TEXT")
+    private String content;
+    
+    @Column(length = 100)
+    private String author;
+    
+    @Column(length = 500)
     private String url;
-
-
+    
+    @Column
+    private LocalDateTime createdAt;
+    
+    @Column
+    private LocalDateTime ingestionTime;
+    
+    @Column
+    private LocalDateTime processedAt;
+    
+    // Reddit-specific fields
+    @Column
+    private Integer score;
+    
+    @Column
+    private Integer commentCount;
+    
+    @Column(length = 100)
+    private String subreddit;
+    
+    // Sentiment analysis results (will be populated by sentiment service)
+    @Column(length = 20)
+    private String sentimentLabel;  // POSITIVE, NEGATIVE, NEUTRAL
+    
+    @Column
+    private Double sentimentScore;  // -1.0 to 1.0
+    
+    @Column
+    private Double confidenceScore; // 0.0 to 1.0
+    
     // Constructors
-    public SocialPost() {
-        this.fetchedAt = LocalDateTime.now();
-    }
-
-    public SocialPost(String platform, String externalId, String content, String author, LocalDateTime createdAt) {
-        this();
+    public SocialPost() {}
+    
+    public SocialPost(String postId, String platform, String title, String content) {
+        this.postId = postId;
         this.platform = platform;
-        this.externalId = externalId;
-        this.content = content;
-        this.author = author;
-        this.createdAt = createdAt;
-    }
-    // Getters and Setters
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getPlatform() {
-        return platform;
-    }
-
-    public void setPlatform(String platform) {
-        this.platform = platform;
-    }
-
-    public String getExternalId() {
-        return externalId;
-    }
-
-    public void setExternalId(String externalId) {
-        this.externalId = externalId;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getAuthor() {
-        return author;
-    }
-
-    public void setAuthor(String author) {
-        this.author = author;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
         this.title = title;
+        this.content = content;
+        this.ingestionTime = LocalDateTime.now();
     }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getFetchedAt() {
-        return fetchedAt;
-    }
-
-    public void setFetchedAt(LocalDateTime fetchedAt) {
-        this.fetchedAt = fetchedAt;
-    }
-
-    public Integer getUpvotes() {
-        return upvotes;
-    }
-
-    public void setUpvotes(Integer upvotes) {
-        this.upvotes = upvotes;
-    }
-
-    public Integer getDownvotes() {
-        return downvotes;
-    }
-
-    public void setDownvotes(Integer downvotes) {
-        this.downvotes = downvotes;
-    }
-
-    public Integer getCommentsCount() {
-        return commentsCount;
-    }
-
-    public void setCommentsCount(Integer commentsCount) {
-        this.commentsCount = commentsCount;
-    }
-
-    public String getUrl() {
-        return url;
-    }
-
-    public void setUrl(String url) {
-        this.url = url;
-    }
-
+    
+    // Getters and setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    
+    public String getPostId() { return postId; }
+    public void setPostId(String postId) { this.postId = postId; }
+    
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
+    
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+    
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+    
+    public String getAuthor() { return author; }
+    public void setAuthor(String author) { this.author = author; }
+    
+    public String getUrl() { return url; }
+    public void setUrl(String url) { this.url = url; }
+    
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    
+    public LocalDateTime getIngestionTime() { return ingestionTime; }
+    public void setIngestionTime(LocalDateTime ingestionTime) { this.ingestionTime = ingestionTime; }
+    
+    public LocalDateTime getProcessedAt() { return processedAt; }
+    public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }
+    
+    public Integer getScore() { return score; }
+    public void setScore(Integer score) { this.score = score; }
+    
+    public Integer getCommentCount() { return commentCount; }
+    public void setCommentCount(Integer commentCount) { this.commentCount = commentCount; }
+    
+    public String getSubreddit() { return subreddit; }
+    public void setSubreddit(String subreddit) { this.subreddit = subreddit; }
+    
+    public String getSentimentLabel() { return sentimentLabel; }
+    public void setSentimentLabel(String sentimentLabel) { this.sentimentLabel = sentimentLabel; }
+    
+    public Double getSentimentScore() { return sentimentScore; }
+    public void setSentimentScore(Double sentimentScore) { this.sentimentScore = sentimentScore; }
+    
+    public Double getConfidenceScore() { return confidenceScore; }
+    public void setConfidenceScore(Double confidenceScore) { this.confidenceScore = confidenceScore; }
+    
     @Override
     public String toString() {
         return "SocialPost{" +
                 "id=" + id +
+                ", postId='" + postId + '\'' +
                 ", platform='" + platform + '\'' +
-                ", externalId='" + externalId + '\'' +
-                ", author='" + author + '\'' +
                 ", title='" + title + '\'' +
+                ", author='" + author + '\'' +
+                ", subreddit='" + subreddit + '\'' +
                 ", createdAt=" + createdAt +
                 '}';
     }
