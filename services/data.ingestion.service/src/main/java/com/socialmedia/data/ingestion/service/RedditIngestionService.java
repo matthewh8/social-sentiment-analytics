@@ -83,10 +83,10 @@ public class RedditIngestionService {
         // Set additional fields
         socialPost.setTitle(redditPost.getTitle());
         socialPost.setUrl(redditPost.getUrl());
-        socialPost.setUpvotes(redditPost.getScore()); // Use new field name
-        socialPost.setCommentsCount(redditPost.getNumComments()); // Use new field name
+        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore().longValue() : 0L);
+        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments().longValue() : 0L);
         socialPost.setSubreddit(redditPost.getSubreddit());
-        
+                
         // Convert Reddit timestamp (Unix epoch) to LocalDateTime
         if (redditPost.getCreatedUtc() != null) {
             LocalDateTime createdAt = LocalDateTime.ofInstant(

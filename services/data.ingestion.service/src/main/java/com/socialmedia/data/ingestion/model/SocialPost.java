@@ -79,22 +79,22 @@ public class SocialPost {
     
     // Multi-platform engagement metrics
     @Column(name = "upvotes")
-    private Integer upvotes = 0;
+    private Long upvotes = 0L;
     
     @Column(name = "downvotes")
-    private Integer downvotes = 0;
+    private Long downvotes = 0L;
     
-    @Column(name = "comments_count")
-    private Integer commentsCount = 0;
+    @Column(name = "comment_count")
+    private Long commentCount = 0L;
     
-    @Column(name = "shares_count")
-    private Integer sharesCount = 0;
+    @Column(name = "share_count")
+    private Long shareCount = 0L;
     
-    @Column(name = "likes_count")
-    private Integer likesCount = 0;
+    @Column(name = "like_count")
+    private Long likeCount = 0L;
     
-    @Column(name = "views_count")
-    private Long viewsCount = 0L;
+    @Column(name = "view_count")
+    private Long viewCount = 0L;
     
     @Column(name = "engagement_score")
     private Double engagementScore = 0.0;
@@ -102,6 +102,10 @@ public class SocialPost {
     // Platform-specific fields
     @Column(name = "subreddit", length = 100)
     private String subreddit; // Reddit
+    
+    @Column(name = "video_id", length = 500)
+    @Size(max = 500, message = "Video ID must be less than 500 characters")
+    private String videoId; // YouTube
     
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "post_hashtags", joinColumns = @JoinColumn(name = "post_id"))
@@ -177,23 +181,23 @@ public class SocialPost {
         double score = 0.0;
         if (upvotes != null) score += upvotes * 1.0;
         if (downvotes != null) score -= downvotes * 0.5;
-        if (commentsCount != null) score += commentsCount * 2.0;
+        if (commentCount != null) score += commentCount * 2.0;
         return Math.max(0, score);
     }
     
     private double calculateTwitterEngagement() {
         double score = 0.0;
-        if (likesCount != null) score += likesCount * 0.5;
-        if (commentsCount != null) score += commentsCount * 2.0;
-        if (sharesCount != null) score += sharesCount * 3.0;
+        if (likeCount != null) score += likeCount * 0.5;
+        if (commentCount != null) score += commentCount * 2.0;
+        if (shareCount != null) score += shareCount * 3.0;
         return score;
     }
     
     private double calculateYouTubeEngagement() {
         double score = 0.0;
-        if (likesCount != null) score += likesCount * 1.0;
-        if (commentsCount != null) score += commentsCount * 2.5;
-        if (viewsCount != null) score += viewsCount * 0.01;
+        if (likeCount != null) score += likeCount * 1.0;
+        if (commentCount != null) score += commentCount * 2.5;
+        if (viewCount != null) score += viewCount * 0.01;
         return score;
     }
     
@@ -254,29 +258,32 @@ public class SocialPost {
     public String getContentHash() { return contentHash; }
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
     
-    public Integer getUpvotes() { return upvotes; }
-    public void setUpvotes(Integer upvotes) { this.upvotes = upvotes; }
+    public Long getUpvotes() { return upvotes; }
+    public void setUpvotes(Long upvotes) { this.upvotes = upvotes; }
     
-    public Integer getDownvotes() { return downvotes; }
-    public void setDownvotes(Integer downvotes) { this.downvotes = downvotes; }
+    public Long getDownvotes() { return downvotes; }
+    public void setDownvotes(Long downvotes) { this.downvotes = downvotes; }
     
-    public Integer getCommentsCount() { return commentsCount; }
-    public void setCommentsCount(Integer commentsCount) { this.commentsCount = commentsCount; }
+    public Long getCommentCount() { return commentCount; }
+    public void setCommentCount(Long commentCount) { this.commentCount = commentCount; }
     
-    public Integer getSharesCount() { return sharesCount; }
-    public void setSharesCount(Integer sharesCount) { this.sharesCount = sharesCount; }
+    public Long getShareCount() { return shareCount; }
+    public void setShareCount(Long shareCount) { this.shareCount = shareCount; }
     
-    public Integer getLikesCount() { return likesCount; }
-    public void setLikesCount(Integer likesCount) { this.likesCount = likesCount; }
+    public Long getLikeCount() { return likeCount; }
+    public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
     
-    public Long getViewsCount() { return viewsCount; }
-    public void setViewsCount(Long viewsCount) { this.viewsCount = viewsCount; }
+    public Long getViewCount() { return viewCount; }
+    public void setViewCount(Long viewCount) { this.viewCount = viewCount; }
     
     public Double getEngagementScore() { return engagementScore; }
     public void setEngagementScore(Double engagementScore) { this.engagementScore = engagementScore; }
     
     public String getSubreddit() { return subreddit; }
     public void setSubreddit(String subreddit) { this.subreddit = subreddit; }
+    
+    public String getVideoId() { return videoId; }
+    public void setVideoId(String videoId) { this.videoId = videoId; }
     
     public Set<String> getHashtags() { return hashtags; }
     public void setHashtags(Set<String> hashtags) { this.hashtags = hashtags; }
@@ -297,14 +304,29 @@ public class SocialPost {
     public void setPostId(String postId) { this.externalId = postId; }
     
     @Deprecated
-    public Integer getScore() { return upvotes; }
+    public Long getScore() { return upvotes; }
     @Deprecated
-    public void setScore(Integer score) { this.upvotes = score; }
+    public void setScore(Long score) { this.upvotes = score; }
     
     @Deprecated
-    public Integer getCommentCount() { return commentsCount; }
+    public Long getCommentsCount() { return commentCount; }
     @Deprecated
-    public void setCommentCount(Integer commentCount) { this.commentsCount = commentCount; }
+    public void setCommentsCount(Long commentsCount) { this.commentCount = commentsCount; }
+    
+    @Deprecated
+    public Long getLikesCount() { return likeCount; }
+    @Deprecated
+    public void setLikesCount(Long likesCount) { this.likeCount = likesCount; }
+    
+    @Deprecated
+    public Long getSharesCount() { return shareCount; }
+    @Deprecated
+    public void setSharesCount(Long sharesCount) { this.shareCount = sharesCount; }
+    
+    @Deprecated
+    public Long getViewsCount() { return viewCount; }
+    @Deprecated
+    public void setViewsCount(Long viewsCount) { this.viewCount = viewsCount; }
     
     @Deprecated
     public LocalDateTime getIngestionTime() { return ingestedAt; }
@@ -334,6 +356,7 @@ public class SocialPost {
                 ", title='" + title + '\'' +
                 ", author='" + author + '\'' +
                 ", subreddit='" + subreddit + '\'' +
+                ", videoId='" + videoId + '\'' +
                 ", engagementScore=" + engagementScore +
                 ", createdAt=" + createdAt +
                 '}';
