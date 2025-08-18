@@ -7,6 +7,9 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * SocialPostDto - Reddit and YouTube focused (2025 version)
+ */
 public class SocialPostDto {
     
     private Long id;
@@ -18,16 +21,15 @@ public class SocialPostDto {
     @NotNull(message = "Platform is required")
     private Platform platform;
     
+    @NotBlank(message = "Title is required") // Both Reddit and YouTube have titles in 2025
     @Size(max = 500, message = "Title must not exceed 500 characters")
-    private String title; // Reddit/YouTube titles (null for Twitter)
+    private String title;
     
-    @NotBlank(message = "Content is required")
     @Size(max = 10000, message = "Content must not exceed 10000 characters")
-    private String content;
+    private String content; // Optional for YouTube, required for Reddit
     
     @NotBlank(message = "Author is required")
     @Size(max = 255, message = "Author must not exceed 255 characters")
-
     private String author;
     
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -37,24 +39,21 @@ public class SocialPostDto {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime ingestedAt;
     
-    // Engagement metrics
+    // Engagement metrics (no downvotes - removed in 2025)
     @Min(value = 0, message = "Upvotes must be non-negative")
-    private Long upvotes = 0L;
-    
-    @Min(value = 0, message = "Downvotes must be non-negative")
-    private Long downvotes = 0L;
+    private Long upvotes = 0L; // Reddit only
     
     @Min(value = 0, message = "Like count must be non-negative")
-    private Long likeCount = 0L;
+    private Long likeCount = 0L; // YouTube only
     
     @Min(value = 0, message = "Share count must be non-negative")
-    private Long shareCount = 0L;
+    private Long shareCount = 0L; // Both platforms
     
     @Min(value = 0, message = "Comment count must be non-negative")
-    private Long commentCount = 0L;
+    private Long commentCount = 0L; // Both platforms
     
     @DecimalMin(value = "0.0", message = "Engagement score must be non-negative")
-    @DecimalMax(value = "100.0", message = "Engagement score must not exceed 100.0")
+    @DecimalMax(value = "10000.0", message = "Engagement score must not exceed 10000.0")
     private Double engagementScore = 0.0;
     
     // Platform-specific fields
@@ -66,6 +65,9 @@ public class SocialPostDto {
     
     @Size(max = 500, message = "Video ID must not exceed 500 characters")
     private String videoId; // YouTube specific
+    
+    @Size(max = 1000, message = "URL must not exceed 1000 characters")
+    private String url; // External URL
     
     // Content analysis
     private List<String> hashtags;
@@ -88,10 +90,11 @@ public class SocialPostDto {
         this.ingestedAt = LocalDateTime.now();
     }
     
-    public SocialPostDto(String externalId, Platform platform, String content, String author, LocalDateTime createdAt) {
+    public SocialPostDto(String externalId, Platform platform, String title, String content, String author, LocalDateTime createdAt) {
         this();
         this.externalId = externalId;
         this.platform = platform;
+        this.title = title;
         this.content = content;
         this.author = author;
         this.createdAt = createdAt;
@@ -120,6 +123,11 @@ public class SocialPostDto {
             return this;
         }
         
+        public SocialPostDtoBuilder title(String title) {
+            dto.title = title;
+            return this;
+        }
+        
         public SocialPostDtoBuilder content(String content) {
             dto.content = content;
             return this;
@@ -145,8 +153,33 @@ public class SocialPostDto {
             return this;
         }
         
+        public SocialPostDtoBuilder commentCount(Long commentCount) {
+            dto.commentCount = commentCount;
+            return this;
+        }
+        
+        public SocialPostDtoBuilder shareCount(Long shareCount) {
+            dto.shareCount = shareCount;
+            return this;
+        }
+        
+        public SocialPostDtoBuilder viewCount(Long viewCount) {
+            dto.viewCount = viewCount;
+            return this;
+        }
+        
         public SocialPostDtoBuilder subreddit(String subreddit) {
             dto.subreddit = subreddit;
+            return this;
+        }
+        
+        public SocialPostDtoBuilder videoId(String videoId) {
+            dto.videoId = videoId;
+            return this;
+        }
+        
+        public SocialPostDtoBuilder url(String url) {
+            dto.url = url;
             return this;
         }
         
@@ -155,12 +188,46 @@ public class SocialPostDto {
             return this;
         }
         
+        public SocialPostDtoBuilder engagementScore(Double engagementScore) {
+            dto.engagementScore = engagementScore;
+            return this;
+        }
+        
         public SocialPostDto build() {
             return dto;
         }
     }
     
-    // Getters and Setters (abbreviated for space, but include all fields)
+    /**
+     * Validation helper method for platform-specific requirements
+     */
+    public boolean isValidForPlatform() {
+        switch (platform) {
+            case REDDIT:
+                return content != null && !content.trim().isEmpty() && 
+                       subreddit != null && !subreddit.trim().isEmpty();
+            case YOUTUBE:
+                return videoId != null && !videoId.trim().isEmpty();
+            default:
+                return false;
+        }
+    }
+    
+    /**
+     * Check if this is a Reddit post
+     */
+    public boolean isRedditPost() {
+        return platform == Platform.REDDIT;
+    }
+    
+    /**
+     * Check if this is a YouTube post
+     */
+    public boolean isYouTubePost() {
+        return platform == Platform.YOUTUBE;
+    }
+    
+    // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     
@@ -169,6 +236,9 @@ public class SocialPostDto {
     
     public Platform getPlatform() { return platform; }
     public void setPlatform(Platform platform) { this.platform = platform; }
+    
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
     
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
@@ -184,9 +254,6 @@ public class SocialPostDto {
     
     public Long getUpvotes() { return upvotes; }
     public void setUpvotes(Long upvotes) { this.upvotes = upvotes; }
-    
-    public Long getDownvotes() { return downvotes; }
-    public void setDownvotes(Long downvotes) { this.downvotes = downvotes; }
     
     public Long getLikeCount() { return likeCount; }
     public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
@@ -209,6 +276,9 @@ public class SocialPostDto {
     public String getVideoId() { return videoId; }
     public void setVideoId(String videoId) { this.videoId = videoId; }
     
+    public String getUrl() { return url; }
+    public void setUrl(String url) { this.url = url; }
+    
     public List<String> getHashtags() { return hashtags; }
     public void setHashtags(List<String> hashtags) { this.hashtags = hashtags; }
     
@@ -226,4 +296,17 @@ public class SocialPostDto {
     
     public Double getConfidence() { return confidence; }
     public void setConfidence(Double confidence) { this.confidence = confidence; }
+    
+    @Override
+    public String toString() {
+        return "SocialPostDto{" +
+                "id=" + id +
+                ", platform=" + platform +
+                ", externalId='" + externalId + '\'' +
+                ", title='" + title + '\'' +
+                ", author='" + author + '\'' +
+                ", subreddit='" + subreddit + '\'' +
+                ", videoId='" + videoId + '\'' +
+                '}';
+    }
 }

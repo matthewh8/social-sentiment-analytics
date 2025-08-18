@@ -1,5 +1,10 @@
 package com.socialmedia.data.ingestion.dto;
 
+/**
+ * Engagement statistics for Reddit and YouTube (2025 version)
+ * Removed: downvotes (deprecated in 2025)
+ * Updated: metrics for current platform features
+ */
 public class EngagementStats {
     
     // Overall engagement statistics
@@ -9,10 +14,9 @@ public class EngagementStats {
     private Double minEngagementScore;
     private Double standardDeviation;
     
-    // Like/upvote statistics
-    private Long totalLikes;
-    private Long totalUpvotes;
-    private Long totalDownvotes;
+    // Like/upvote statistics (platform-specific)
+    private Long totalLikes; // YouTube
+    private Long totalUpvotes; // Reddit
     private Double averageLikes;
     private Double averageUpvotes;
     
@@ -27,9 +31,10 @@ public class EngagementStats {
     private Double averageViews;
     
     // Engagement rate calculations
-    private Double likesToViewsRatio;
+    private Double likesToViewsRatio; // YouTube
     private Double commentsToLikesRatio;
     private Double sharesToLikesRatio;
+    private Double commentsToUpvotesRatio; // Reddit
     
     // Distribution percentiles
     private Double engagementScore25thPercentile;
@@ -46,18 +51,28 @@ public class EngagementStats {
     }
     
     // Helper methods for calculations
-    public Double calculateEngagementRate() {
+    public Double calculateYouTubeEngagementRate() {
         if (totalViews != null && totalViews > 0 && totalLikes != null) {
             return (totalLikes.doubleValue() / totalViews.doubleValue()) * 100;
         }
         return 0.0;
     }
     
-    public Double calculateInteractionRate() {
-        if (totalLikes != null && totalComments != null && totalShares != null) {
-            return (double)(totalLikes + totalComments + totalShares);
+    public Double calculateRedditEngagementRate() {
+        if (totalUpvotes != null && totalComments != null) {
+            long totalEngagement = totalUpvotes + totalComments;
+            return totalEngagement > 0 ? (totalComments.doubleValue() / totalEngagement) * 100 : 0.0;
         }
         return 0.0;
+    }
+    
+    public Double calculateInteractionRate() {
+        long totalInteractions = 0;
+        if (totalLikes != null) totalInteractions += totalLikes;
+        if (totalUpvotes != null) totalInteractions += totalUpvotes;
+        if (totalComments != null) totalInteractions += totalComments;
+        if (totalShares != null) totalInteractions += totalShares;
+        return (double) totalInteractions;
     }
     
     // Getters and Setters
@@ -75,22 +90,19 @@ public class EngagementStats {
     
     public Double getStandardDeviation() { return standardDeviation; }
     public void setStandardDeviation(Double standardDeviation) { this.standardDeviation = standardDeviation; }
-  
+    
     public Long getTotalLikes() { return totalLikes; }
     public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
     
     public Long getTotalUpvotes() { return totalUpvotes; }
     public void setTotalUpvotes(Long totalUpvotes) { this.totalUpvotes = totalUpvotes; }
     
-    public Long getTotalDownvotes() { return totalDownvotes; }
-    public void setTotalDownvotes(Long totalDownvotes) { this.totalDownvotes = totalDownvotes; }
-    
     public Double getAverageLikes() { return averageLikes; }
     public void setAverageLikes(Double averageLikes) { this.averageLikes = averageLikes; }
     
     public Double getAverageUpvotes() { return averageUpvotes; }
     public void setAverageUpvotes(Double averageUpvotes) { this.averageUpvotes = averageUpvotes; }
-
+    
     public Long getTotalComments() { return totalComments; }
     public void setTotalComments(Long totalComments) { this.totalComments = totalComments; }
     
@@ -118,6 +130,9 @@ public class EngagementStats {
     public Double getSharesToLikesRatio() { return sharesToLikesRatio; }
     public void setSharesToLikesRatio(Double sharesToLikesRatio) { this.sharesToLikesRatio = sharesToLikesRatio; }
     
+    public Double getCommentsToUpvotesRatio() { return commentsToUpvotesRatio; }
+    public void setCommentsToUpvotesRatio(Double commentsToUpvotesRatio) { this.commentsToUpvotesRatio = commentsToUpvotesRatio; }
+    
     public Double getEngagementScore25thPercentile() { return engagementScore25thPercentile; }
     public void setEngagementScore25thPercentile(Double engagementScore25thPercentile) { this.engagementScore25thPercentile = engagementScore25thPercentile; }
     
@@ -127,4 +142,3 @@ public class EngagementStats {
     public Double getEngagementScore90thPercentile() { return engagementScore90thPercentile; }
     public void setEngagementScore90thPercentile(Double engagementScore90thPercentile) { this.engagementScore90thPercentile = engagementScore90thPercentile; }
 }
-    

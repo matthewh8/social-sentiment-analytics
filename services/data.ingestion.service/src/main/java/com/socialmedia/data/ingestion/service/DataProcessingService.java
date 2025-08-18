@@ -89,7 +89,6 @@ public class DataProcessingService {
                 savedPosts.add(saved);
             } catch (Exception e) {
                 errors.add("Failed to save post " + postDto.getExternalId() + ": " + e.getMessage());
-
                 logger.error("Error saving post {}: {}", postDto.getExternalId(), e.getMessage());
             }
         }
@@ -224,20 +223,24 @@ public class DataProcessingService {
         
         if (existingPost.isEmpty()) {
             logger.warn("Post not found for update: {} on platform: {}", externalId, platform);
-
             throw new PostNotFoundException("Post not found: " + externalId);
         }
         
         SocialPost post = existingPost.get();
         
-        // Update engagement fields
-        if (updates.getLikeCount() != null) post.setLikeCount(updates.getLikeCount());
+        // Update engagement fields based on platform
+        if (platform == Platform.REDDIT) {
+            if (updates.getUpvotes() != null) post.setUpvotes(updates.getUpvotes());
+        }
+        
+        if (platform == Platform.YOUTUBE) {
+            if (updates.getLikeCount() != null) post.setLikeCount(updates.getLikeCount());
+            if (updates.getViewCount() != null) post.setViewCount(updates.getViewCount());
+        }
+        
+        // Common fields for both platforms
         if (updates.getShareCount() != null) post.setShareCount(updates.getShareCount());
         if (updates.getCommentCount() != null) post.setCommentCount(updates.getCommentCount());
-        if (updates.getUpvotes() != null) post.setUpvotes(updates.getUpvotes());
-        if (updates.getDownvotes() != null) post.setDownvotes(updates.getDownvotes());
-
-        if (updates.getViewCount() != null) post.setViewCount(updates.getViewCount());
         
         // Recalculate engagement score
         post.setEngagementScore(calculateEngagementScore(post));
@@ -265,6 +268,15 @@ public class DataProcessingService {
         
         if (postDto.getCreatedAt() != null && postDto.getCreatedAt().isAfter(LocalDateTime.now())) {
             throw new ValidationException("Created date cannot be in the future");
+        }
+        
+        // Platform-specific validation
+        if (postDto.getPlatform() == Platform.REDDIT && !StringUtils.hasText(postDto.getSubreddit())) {
+            throw new ValidationException("Subreddit is required for Reddit posts");
+        }
+        
+        if (postDto.getPlatform() == Platform.YOUTUBE && !StringUtils.hasText(postDto.getVideoId())) {
+            throw new ValidationException("Video ID is required for YouTube posts");
         }
     }
     
@@ -333,8 +345,6 @@ public class DataProcessingService {
         switch (post.getPlatform()) {
             case REDDIT:
                 return calculateRedditEngagementScore(post);
-            case TWITTER:
-                return calculateTwitterEngagementScore(post);
             case YOUTUBE:
                 return calculateYouTubeEngagementScore(post);
             default:
@@ -344,29 +354,17 @@ public class DataProcessingService {
     
     private double calculateRedditEngagementScore(SocialPost post) {
         long upvotes = post.getUpvotes() != null ? post.getUpvotes() : 0;
-        long downvotes = post.getDownvotes() != null ? post.getDownvotes() : 0;
         long comments = post.getCommentCount() != null ? post.getCommentCount() : 0;
         
-        // Reddit-specific formula: weighted score considering upvote ratio and comments
-        long netVotes = upvotes - downvotes;
-        double upvoteRatio = (upvotes + downvotes) > 0 ? (double) upvotes / (upvotes + downvotes) : 0.5;
+        // Reddit formula: upvotes + (comments * 2.5) - comments are valuable
+        double score = upvotes + (comments * 2.5);
         
-        // Score components: net votes (60%), upvote ratio (25%), comments (15%)
-        double score = (netVotes * 0.6) + (upvoteRatio * 100 * 0.25) + (comments * 0.15);
+        // Logarithmic scaling for very high scores to normalize
+        if (score > 1000) {
+            score = 1000 + Math.log10(score - 999) * 100;
+        }
         
-        return Math.max(0, Math.min(100, score));
-    }
-    
-    private double calculateTwitterEngagementScore(SocialPost post) {
-        long likes = post.getLikeCount() != null ? post.getLikeCount() : 0;
-        long shares = post.getShareCount() != null ? post.getShareCount() : 0;
-        long comments = post.getCommentCount() != null ? post.getCommentCount() : 0;
-        
-        // Twitter formula: weighted engagement with retweets having higher value
-        double score = (likes * 0.4) + (shares * 0.4) + (comments * 0.2);
-        
-        return Math.max(0, Math.min(100, score / 10)); // Normalize to 0-100 scale
-
+        return Math.max(0, Math.min(10000, score));
     }
     
     private double calculateYouTubeEngagementScore(SocialPost post) {
@@ -374,12 +372,19 @@ public class DataProcessingService {
         long views = post.getViewCount() != null ? post.getViewCount() : 0;
         long comments = post.getCommentCount() != null ? post.getCommentCount() : 0;
         
-        if (views == 0) return 0.0;
+        if (views == 0) {
+            // If no views, base score on likes and comments only
+            return Math.max(0, Math.min(10000, (likes * 1.5) + (comments * 3.0)));
+        }
         
         // YouTube formula: engagement rate based on views
-        double engagementRate = ((double) (likes + comments) / views) * 100;
+        double engagementRate = ((double) (likes + comments)) / views;
+        double baseEngagement = (likes * 1.5) + (comments * 3.0);
         
-        return Math.max(0, Math.min(100, engagementRate * 10)); // Scale appropriately
+        // Scale engagement rate and combine with base
+        double score = (engagementRate * views * 0.1) + baseEngagement;
+        
+        return Math.max(0, Math.min(10000, score));
     }
     
     private double calculateGenericEngagementScore(SocialPost post) {
@@ -391,7 +396,7 @@ public class DataProcessingService {
         if (post.getUpvotes() != null) totalEngagement += post.getUpvotes();
         
         // Generic logarithmic scale
-        return totalEngagement > 0 ? Math.min(100, Math.log10(totalEngagement + 1) * 20) : 0.0;
+        return totalEngagement > 0 ? Math.min(10000, Math.log10(totalEngagement + 1) * 200) : 0.0;
     }
     
     private void processContentFeatures(SocialPost post) {
@@ -465,17 +470,22 @@ public class DataProcessingService {
         entity.setCreatedAt(dto.getCreatedAt());
         entity.setIngestedAt(dto.getIngestedAt() != null ? dto.getIngestedAt() : LocalDateTime.now());
         
-        // Engagement metrics
-        entity.setUpvotes(dto.getUpvotes());
-        entity.setDownvotes(dto.getDownvotes());
-        entity.setLikeCount(dto.getLikeCount());
+        // Platform-specific engagement metrics
+        if (dto.getPlatform() == Platform.REDDIT) {
+            entity.setUpvotes(dto.getUpvotes());
+            entity.setSubreddit(dto.getSubreddit());
+        }
+        
+        if (dto.getPlatform() == Platform.YOUTUBE) {
+            entity.setLikeCount(dto.getLikeCount());
+            entity.setViewCount(dto.getViewCount());
+            entity.setVideoId(dto.getVideoId());
+        }
+        
+        // Common fields
         entity.setShareCount(dto.getShareCount());
         entity.setCommentCount(dto.getCommentCount());
-        
-        // Platform-specific fields
-        entity.setSubreddit(dto.getSubreddit());
-        entity.setViewCount(dto.getViewCount());
-        entity.setVideoId(dto.getVideoId());
+        entity.setUrl(dto.getUrl());
         
         // Content features - convert Lists to Sets
         if (dto.getHashtags() != null) {
@@ -496,19 +506,22 @@ public class DataProcessingService {
                 .id(entity.getId())
                 .externalId(entity.getExternalId())
                 .platform(entity.getPlatform())
-                .title(entity.getTitle()) // Add this line
+                .title(entity.getTitle())
                 .content(entity.getContent())
                 .author(entity.getAuthor())
                 .createdAt(entity.getCreatedAt())
                 .upvotes(entity.getUpvotes())
                 .likeCount(entity.getLikeCount())
+                .commentCount(entity.getCommentCount())
+                .shareCount(entity.getShareCount())
+                .viewCount(entity.getViewCount())
                 .subreddit(entity.getSubreddit())
+                .videoId(entity.getVideoId())
+                .url(entity.getUrl())
+                .engagementScore(entity.getEngagementScore())
                 .hashtags(entity.getHashtags() != null ? new ArrayList<>(entity.getHashtags()) : null)
                 .build();
     }
-    
-    // Additional helper methods for analytics report generation would continue here...
-    // (populateBasicMetrics, populatePlatformMetrics, etc.)
     
     private Sort createSort(String sortBy, PostSearchCriteria.SortDirection direction) {
         Sort.Direction sortDirection = direction == PostSearchCriteria.SortDirection.ASC ? 
@@ -517,11 +530,9 @@ public class DataProcessingService {
     }
     
     private Page<SocialPost> executeSearch(PostSearchCriteria criteria, Pageable pageable) {
-        // Use your existing repository methods based on criteria
-        
         // Content keyword search
         if (StringUtils.hasText(criteria.getContentKeyword()) && criteria.getPlatforms() != null) {
-            Platform platform = criteria.getPlatforms().get(0); // Use first platform for keyword search
+            Platform platform = criteria.getPlatforms().get(0);
             List<SocialPost> results = socialPostRepository.findByContentContainingAndPlatform(
                 criteria.getContentKeyword(), platform, pageable);
             return new PageImpl<>(results, pageable, results.size());
@@ -529,7 +540,7 @@ public class DataProcessingService {
         
         // Hashtag search
         if (criteria.getHashtags() != null && !criteria.getHashtags().isEmpty()) {
-            String hashtag = criteria.getHashtags().get(0); // Use first hashtag
+            String hashtag = criteria.getHashtags().get(0);
             List<SocialPost> results = socialPostRepository.findByHashtag(hashtag);
             int start = (int) pageable.getOffset();
             int end = Math.min((start + pageable.getPageSize()), results.size());
@@ -557,24 +568,15 @@ public class DataProcessingService {
             return new PageImpl<>(results, pageable, results.size());
         }
         
-        // Trending posts search
-        if (criteria.getStartDate() != null && criteria.getMinEngagementScore() != null) {
-            List<SocialPost> results = socialPostRepository.findTrendingPosts(
-                criteria.getStartDate(), criteria.getMinEngagementScore(), pageable);
-            return new PageImpl<>(results, pageable, results.size());
-        }
-        
         // Platform and date range search
         if (criteria.getPlatforms() != null && !criteria.getPlatforms().isEmpty()) {
             if (criteria.getStartDate() != null && criteria.getEndDate() != null) {
-                // This method needs to be added to repository
                 List<SocialPost> results = new ArrayList<>();
                 for (Platform platform : criteria.getPlatforms()) {
                     List<SocialPost> platformPosts = socialPostRepository.findByPlatformAndCreatedAtBetween(
                         platform, criteria.getStartDate(), criteria.getEndDate());
                     results.addAll(platformPosts);
                 }
-                // Sort and paginate manually
                 results.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
                 int start = (int) pageable.getOffset();
                 int end = Math.min((start + pageable.getPageSize()), results.size());
@@ -586,11 +588,8 @@ public class DataProcessingService {
         
         // Date range only
         else if (criteria.getStartDate() != null && criteria.getEndDate() != null) {
-            List<SocialPost> results = socialPostRepository.findByCreatedAtBetween(
-                criteria.getStartDate(), criteria.getEndDate());
-            int start = (int) pageable.getOffset();
-            int end = Math.min((start + pageable.getPageSize()), results.size());
-            return new PageImpl<>(results.subList(start, end), pageable, results.size());
+            return socialPostRepository.findByCreatedAtBetween(
+                criteria.getStartDate(), criteria.getEndDate(), pageable);
         } 
         
         // Default: return all with pagination
@@ -618,35 +617,42 @@ public class DataProcessingService {
         stats.setMaxEngagementScore(engagementScores[engagementScores.length - 1]);
         stats.setMinEngagementScore(engagementScores[0]);
         
-        // Calculate totals
+        // Calculate platform-specific totals
         stats.setTotalLikes(posts.stream().mapToLong(p -> p.getLikeCount() != null ? p.getLikeCount() : 0).sum());
+        stats.setTotalUpvotes(posts.stream().mapToLong(p -> p.getUpvotes() != null ? p.getUpvotes() : 0).sum());
         stats.setTotalComments(posts.stream().mapToLong(p -> p.getCommentCount() != null ? p.getCommentCount() : 0).sum());
         stats.setTotalShares(posts.stream().mapToLong(p -> p.getShareCount() != null ? p.getShareCount() : 0).sum());
+        stats.setTotalViews(posts.stream().mapToLong(p -> p.getViewCount() != null ? p.getViewCount() : 0).sum());
         
         return stats;
     }
     
-    // Placeholder methods for analytics report population
+    // ===== ANALYTICS REPORT METHODS =====
+    
     private void populateBasicMetrics(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        // Use your existing getVolumeStatistics method
         Object[] stats = socialPostRepository.getVolumeStatistics(start);
         if (stats != null && stats.length >= 4) {
             report.setTotalPosts((Long) stats[0]);
             report.setTotalAuthors((Long) stats[1]);
             report.setAverageEngagementScore((Double) stats[3]);
         } else {
-            // Fallback to simple count
-            List<SocialPost> posts = socialPostRepository.findByCreatedAtBetween(start, end);
-            report.setTotalPosts((long) posts.size());
-            report.setTotalAuthors((long) posts.stream().map(SocialPost::getAuthor).distinct().count());
-            report.setAverageEngagementScore(posts.stream()
+            // Use count method instead of loading all posts
+            Long totalPosts = socialPostRepository.countByCreatedAtBetween(start, end);
+            report.setTotalPosts(totalPosts);
+            
+            // Get a sample for calculations if needed
+            Pageable samplePageable = PageRequest.of(0, 1000);
+            Page<SocialPost> samplePosts = socialPostRepository.findByCreatedAtBetween(start, end, samplePageable);
+            
+            report.setTotalAuthors((long) samplePosts.getContent().stream()
+                .map(SocialPost::getAuthor).distinct().count());
+            report.setAverageEngagementScore(samplePosts.getContent().stream()
                 .mapToDouble(p -> p.getEngagementScore() != null ? p.getEngagementScore() : 0.0)
                 .average().orElse(0.0));
         }
     }
     
     private void populatePlatformMetrics(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        // Use your existing getPlatformComparisonData method
         List<Object[]> platformData = socialPostRepository.getPlatformComparisonData(start);
         
         Map<Platform, Long> postsByPlatform = new HashMap<>();
@@ -666,114 +672,192 @@ public class DataProcessingService {
     }
     
     private void populateSentimentMetrics(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        // Use sentiment repository to get sentiment distribution
         Map<SentimentLabel, Long> sentimentDistribution = new HashMap<>();
         Map<Platform, Double> sentimentByPlatform = new HashMap<>();
         
-        // This would use your SentimentDataRepository when implemented
-        // For now, set defaults
-        sentimentDistribution.put(SentimentLabel.POSITIVE, 0L);
-        sentimentDistribution.put(SentimentLabel.NEGATIVE, 0L);
-        sentimentDistribution.put(SentimentLabel.NEUTRAL, 0L);
+        try {
+            // Get cross-platform sentiment comparison
+            List<Object[]> crossPlatformData = sentimentDataRepository.getCrossPlatformSentimentComparison(start);
+            
+            double totalSentiment = 0.0;
+            long totalCount = 0;
+            
+            for (Object[] row : crossPlatformData) {
+                Platform platform = (Platform) row[0];
+                Double avgSentiment = (Double) row[1];
+                Long count = (Long) row[2];
+                Long positiveCount = (Long) row[3];
+                Long negativeCount = (Long) row[4];
+                Long neutralCount = count - positiveCount - negativeCount;
+                
+                sentimentByPlatform.put(platform, avgSentiment);
+                
+                // Aggregate sentiment distribution
+                sentimentDistribution.merge(SentimentLabel.POSITIVE, positiveCount, Long::sum);
+                sentimentDistribution.merge(SentimentLabel.NEGATIVE, negativeCount, Long::sum);
+                sentimentDistribution.merge(SentimentLabel.NEUTRAL, neutralCount, Long::sum);
+                
+                totalSentiment += avgSentiment * count;
+                totalCount += count;
+            }
+            
+            // Calculate overall sentiment score
+            double overallSentiment = totalCount > 0 ? totalSentiment / totalCount : 0.5;
+            report.setOverallSentimentScore(overallSentiment);
+            
+        } catch (Exception e) {
+            logger.debug("Sentiment data not available, using defaults: {}", e.getMessage());
+            
+            // Provide default values
+            sentimentDistribution.put(SentimentLabel.POSITIVE, 0L);
+            sentimentDistribution.put(SentimentLabel.NEGATIVE, 0L);
+            sentimentDistribution.put(SentimentLabel.NEUTRAL, 0L);
+            report.setOverallSentimentScore(0.5); // Neutral baseline
+        }
         
         report.setSentimentDistribution(sentimentDistribution);
         report.setSentimentByPlatform(sentimentByPlatform);
-        report.setOverallSentimentScore(0.5); // Neutral baseline
     }
     
     private void populateEngagementMetrics(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        List<SocialPost> posts = socialPostRepository.findByCreatedAtBetween(start, end);
-        EngagementStats stats = calculateEngagementStats(posts);
-        report.setEngagementStats(stats);
+        // Use pageable to get a reasonable sample for engagement calculations
+        Pageable engagementPageable = PageRequest.of(0, 5000); // Get up to 5000 posts for analysis
+        Page<SocialPost> postsPage = socialPostRepository.findByCreatedAtBetween(start, end, engagementPageable);
+        
+        EngagementStats engagementStats = calculateEngagementStats(postsPage.getContent());
+        report.setEngagementStats(engagementStats);
     }
     
     private void populateTopPerformers(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        // Top authors using your existing getTopAuthorsByEngagement method
+        // Top Authors
         List<AnalyticsReport.TopAuthor> topAuthors = new ArrayList<>();
-        for (Platform platform : Platform.values()) {
-            List<Object[]> authorData = socialPostRepository.getTopAuthorsByEngagement(platform, 5L);
-            for (Object[] row : authorData) {
-                if (topAuthors.size() < 10) { // Limit to top 10 overall
-                    String author = (String) row[0];
-                    Long postCount = (Long) row[1];
-                    Double avgEngagement = (Double) row[2];
-                    topAuthors.add(new AnalyticsReport.TopAuthor(author, postCount, avgEngagement, platform));
-                }
-            }
-        }
-        report.setTopAuthors(topAuthors);
         
-        // Top posts using your existing findHighEngagementPosts method
-        List<SocialPost> topPostEntities = socialPostRepository.findHighEngagementPosts(50.0, 
-            PageRequest.of(0, 10));
-        List<AnalyticsReport.TopContent> topPosts = topPostEntities.stream()
-            .map(post -> new AnalyticsReport.TopContent(
+        // Get top authors for Reddit
+        List<Object[]> redditAuthors = socialPostRepository.getTopAuthorsByEngagement(Platform.REDDIT, 2L);
+        for (Object[] row : redditAuthors.subList(0, Math.min(5, redditAuthors.size()))) {
+            String author = (String) row[0];
+            Long postCount = (Long) row[1];
+            Double avgEngagement = (Double) row[2];
+            topAuthors.add(new AnalyticsReport.TopAuthor(author, postCount, avgEngagement, Platform.REDDIT));
+        }
+        
+        // Get top authors for YouTube
+        List<Object[]> youtubeAuthors = socialPostRepository.getTopAuthorsByEngagement(Platform.YOUTUBE, 2L);
+        for (Object[] row : youtubeAuthors.subList(0, Math.min(5, youtubeAuthors.size()))) {
+            String author = (String) row[0];
+            Long postCount = (Long) row[1];
+            Double avgEngagement = (Double) row[2];
+            topAuthors.add(new AnalyticsReport.TopAuthor(author, postCount, avgEngagement, Platform.YOUTUBE));
+        }
+        
+        // Sort by engagement and take top 10
+        topAuthors.sort((a, b) -> Double.compare(b.getAvgEngagementScore(), a.getAvgEngagementScore()));
+        report.setTopAuthors(topAuthors.subList(0, Math.min(10, topAuthors.size())));
+        
+        // Top Posts
+        Pageable topPostsPageable = PageRequest.of(0, 10);
+        List<SocialPost> highEngagementPosts = socialPostRepository.findHighEngagementPosts(100.0, topPostsPageable);
+        
+        List<AnalyticsReport.TopPost> topPosts = highEngagementPosts.stream()
+            .map(post -> new AnalyticsReport.TopPost(
                 post.getId(),
+                post.getTitle(),
                 post.getContent(),
                 post.getAuthor(),
                 post.getPlatform(),
-                post.getEngagementScore(),
-                SentimentLabel.NEUTRAL // Default until sentiment analysis is implemented
+                post.getEngagementScore()
             ))
             .collect(Collectors.toList());
+        
         report.setTopPosts(topPosts);
         
-        // Reddit-specific top subreddits using your existing getSubredditStats method
-        List<Object[]> subredditData = socialPostRepository.getSubredditStats();
-        List<AnalyticsReport.SubredditStats> topSubreddits = subredditData.stream()
+        // Top Subreddits (Reddit specific)
+        List<Object[]> subredditStats = socialPostRepository.getSubredditStats();
+        List<AnalyticsReport.SubredditStats> topSubreddits = subredditStats.stream()
             .limit(10)
             .map(row -> new AnalyticsReport.SubredditStats(
-                (String) row[0],
-                (Long) row[1],
-                (Double) row[2]
+                (String) row[0],     // subreddit name
+                (Long) row[1],       // post count
+                (Double) row[2]      // avg engagement
             ))
             .collect(Collectors.toList());
+        
         report.setTopSubreddits(topSubreddits);
     }
     
     private void populateTrends(AnalyticsReport report, LocalDateTime start, LocalDateTime end) {
-        // Use your existing getEngagementTrends method
-        List<AnalyticsReport.TrendPoint> volumeTrend = new ArrayList<>();
+        // Sentiment trends over time
         List<AnalyticsReport.TrendPoint> sentimentTrend = new ArrayList<>();
         
-        for (Platform platform : Platform.values()) {
-            List<Object[]> trendData = socialPostRepository.getEngagementTrends(platform, start, end);
-            for (Object[] row : trendData) {
-                LocalDateTime date = (LocalDateTime) row[0];
-                Double avgEngagement = (Double) row[1];
-                Long postCount = (Long) row[2];
-                
-                volumeTrend.add(new AnalyticsReport.TrendPoint(date, postCount.doubleValue(), postCount));
-                sentimentTrend.add(new AnalyticsReport.TrendPoint(date, avgEngagement, postCount));
-            }
+        // Generate daily sentiment trend (mock data for now)
+        LocalDateTime current = start;
+        while (current.isBefore(end)) {
+            LocalDateTime nextDay = current.plusDays(1);
+            
+            // Use count method instead of loading all posts
+            Long dayPostCount = socialPostRepository.countByCreatedAtBetween(current, nextDay);
+            
+            // Calculate average sentiment for the day (would use actual sentiment data)
+            double avgSentiment = 0.5; // Neutral default
+            
+            sentimentTrend.add(new AnalyticsReport.TrendPoint(current, avgSentiment, dayPostCount));
+            current = nextDay;
         }
         
-        report.setVolumeTrend(volumeTrend);
         report.setSentimentTrend(sentimentTrend);
+        
+        // Volume trends over time
+        List<Object[]> dailyVolume = socialPostRepository.getDailyPostCounts(start, end);
+        List<AnalyticsReport.TrendPoint> volumeTrend = dailyVolume.stream()
+            .map(row -> {
+                LocalDateTime date = (LocalDateTime) row[0];
+                Long count = (Long) row[1];
+                return new AnalyticsReport.TrendPoint(date, count.doubleValue(), count);
+            })
+            .collect(Collectors.toList());
+        
+        report.setVolumeTrend(volumeTrend);
     }
-}
-
-// Custom exception classes
-class DuplicatePostException extends RuntimeException {
-    public DuplicatePostException(String message) {
-        super(message);
+    
+    // ===== CUSTOM EXCEPTION CLASSES =====
+    
+    public static class DuplicatePostException extends RuntimeException {
+        public DuplicatePostException(String message) {
+            super(message);
+        }
+        
+        public DuplicatePostException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
-}
-
-class PostNotFoundException extends RuntimeException {
-    public PostNotFoundException(String message) {
-        super(message);
+    
+    public static class PostNotFoundException extends RuntimeException {
+        public PostNotFoundException(String message) {
+            super(message);
+        }
+        
+        public PostNotFoundException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
-}
-
-class ValidationException extends RuntimeException {
-    public ValidationException(String message) {
-        super(message);
+    
+    public static class ValidationException extends RuntimeException {
+        public ValidationException(String message) {
+            super(message);
+        }
+        
+        public ValidationException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
-}
-
-class AnalyticsException extends RuntimeException {
-    public AnalyticsException(String message, Throwable cause) {
-        super(message, cause);
+    
+    public static class AnalyticsException extends RuntimeException {
+        public AnalyticsException(String message) {
+            super(message);
+        }
+        
+        public AnalyticsException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

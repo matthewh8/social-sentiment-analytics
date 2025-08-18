@@ -1,4 +1,3 @@
-
 package com.socialmedia.data.ingestion.dto;
 
 import com.socialmedia.data.ingestion.model.Platform;
@@ -9,7 +8,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Analytics report
+ * Analytics report for Reddit and YouTube data (2025 version)
+ * Removed: Twitter-specific metrics, downvotes
+ * Added: Consistent title handling for both platforms
  */
 public class AnalyticsReport {
     
@@ -27,7 +28,7 @@ public class AnalyticsReport {
     private Long totalAuthors;
     private Double averageEngagementScore;
     
-    // Platform breakdown
+    // Platform breakdown (Reddit and YouTube only)
     private Map<Platform, Long> postsByPlatform;
     private Map<Platform, Double> avgEngagementByPlatform;
     
@@ -35,17 +36,11 @@ public class AnalyticsReport {
     private Map<SentimentLabel, Long> sentimentDistribution;
     private Double overallSentimentScore;
     private Map<Platform, Double> sentimentByPlatform;
-
     
     // Engagement statistics
     private EngagementStats engagementStats;
     
     // Top performers
-    private List<TopAuthor> topAuthors;
-    private List<TopContent> topPosts;
-    private List<String> topHashtags;
-    private List<String> topTopics;
-    // Top performers (simplified)
     private List<TopAuthor> topAuthors;
     private List<TopPost> topPosts;
     
@@ -95,14 +90,14 @@ public class AnalyticsReport {
         public void setPrimaryPlatform(Platform primaryPlatform) { this.primaryPlatform = primaryPlatform; }
     }
     
-
     public static class TopPost {
         private Long id;
-        private String title;
+        private String title; // Both platforms have titles in 2025
         private String content;
         private String author;
         private Platform platform;
         private Double engagementScore;
+        private SentimentLabel sentiment;
         
         public TopPost(Long id, String title, String content, String author, Platform platform, Double engagementScore) {
             this.id = id;
@@ -119,7 +114,6 @@ public class AnalyticsReport {
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
         
-
         public String getTitle() { return title; }
         public void setTitle(String title) { this.title = title; }
         
@@ -186,7 +180,6 @@ public class AnalyticsReport {
         
         public Long getCount() { return count; }
         public void setCount(Long count) { this.count = count; }
-
     }
     
     // Getters and Setters for main class
@@ -222,21 +215,15 @@ public class AnalyticsReport {
     
     public Map<Platform, Double> getSentimentByPlatform() { return sentimentByPlatform; }
     public void setSentimentByPlatform(Map<Platform, Double> sentimentByPlatform) { this.sentimentByPlatform = sentimentByPlatform; }
-
+    
     public EngagementStats getEngagementStats() { return engagementStats; }
     public void setEngagementStats(EngagementStats engagementStats) { this.engagementStats = engagementStats; }
     
     public List<TopAuthor> getTopAuthors() { return topAuthors; }
     public void setTopAuthors(List<TopAuthor> topAuthors) { this.topAuthors = topAuthors; }
     
-    public List<TopContent> getTopPosts() { return topPosts; }
-    public void setTopPosts(List<TopContent> topPosts) { this.topPosts = topPosts; }
-    
-    public List<String> getTopHashtags() { return topHashtags; }
-    public void setTopHashtags(List<String> topHashtags) { this.topHashtags = topHashtags; }
-    
-    public List<String> getTopTopics() { return topTopics; }
-    public void setTopTopics(List<String> topTopics) { this.topTopics = topTopics; }
+    public List<TopPost> getTopPosts() { return topPosts; }
+    public void setTopPosts(List<TopPost> topPosts) { this.topPosts = topPosts; }
     
     public List<SubredditStats> getTopSubreddits() { return topSubreddits; }
     public void setTopSubreddits(List<SubredditStats> topSubreddits) { this.topSubreddits = topSubreddits; }
@@ -246,9 +233,4 @@ public class AnalyticsReport {
     
     public List<TrendPoint> getVolumeTrend() { return volumeTrend; }
     public void setVolumeTrend(List<TrendPoint> volumeTrend) { this.volumeTrend = volumeTrend; }
-    public List<TopPost> getTopPosts() { return topPosts; }
-    public void setTopPosts(List<TopPost> topPosts) { this.topPosts = topPosts; }
-    
-    public List<SubredditStats> getTopSubreddits() { return topSubreddits; }
-    public void setTopSubreddits(List<SubredditStats> topSubreddits) { this.topSubreddits = topSubreddits; }
 }

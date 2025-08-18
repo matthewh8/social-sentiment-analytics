@@ -4,19 +4,25 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.hibernate.annotations.CreationTimestamp;
+import org.springframework.util.DigestUtils;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
- *  SocialPost entity
-*/
+ * SocialPost entity - Reddit and YouTube focused (2025 version)
+ * Both platforms require titles as of 2025
+ */
 @Entity
 @Table(name = "social_posts", 
        indexes = {
            @Index(name = "idx_platform_created", columnList = "platform, createdAt"),
            @Index(name = "idx_external_platform", columnList = "externalId, platform", unique = true),
-           @Index(name = "idx_engagement", columnList = "engagementScore")
+           @Index(name = "idx_engagement", columnList = "engagementScore"),
+           @Index(name = "idx_subreddit", columnList = "subreddit"),
+           @Index(name = "idx_video_id", columnList = "videoId")
        },
        uniqueConstraints = {
            @UniqueConstraint(name = "uk_external_platform", columnNames = {"externalId", "platform"})
@@ -38,15 +44,15 @@ public class SocialPost {
     @Size(min = 1, max = 100, message = "External ID must be between 1 and 100 characters")
     private String externalId;
     
-    // Content
-    @Column(length = 500) // Reddit titles, YouTube titles (nullable for Twitter)
-    @Size(max = 500, message = "Title must be less than 500 characters")
+    // Content - Both Reddit and YouTube have titles (required in 2025)
+    @Column(length = 500, nullable = false)
+    @NotNull(message = "Title cannot be null")
+    @Size(min = 1, max = 500, message = "Title must be between 1 and 500 characters")
     private String title;
     
     @Column(columnDefinition = "TEXT")
-    @NotNull(message = "Content cannot be null")
-    @Size(min = 1, max = 10000, message = "Content must be between 1 and 10000 characters")
-    private String content;
+    @Size(max = 10000, message = "Content must be less than 10000 characters")
+    private String content; // Optional for YouTube, required for Reddit
     
     @Column(nullable = false, length = 100)
     @NotNull(message = "Author cannot be null")
@@ -65,47 +71,57 @@ public class SocialPost {
     @Column(name = "processed_at")
     private LocalDateTime processedAt;
     
-    @Column(name = "content_hash", nullable = false, length = 64)
+    @Column(name = "content_hash", length = 64)
     private String contentHash;
     
-    // Multi-platform engagement metrics
+    // Engagement metrics (no downvotes - removed in 2025)
     @Column(name = "upvotes")
-    private Long upvotes = 0L;
-    
-    @Column(name = "downvotes")
-    private Long downvotes = 0L;
+    private Long upvotes = 0L; // Reddit only
     
     @Column(name = "comment_count")
-    private Long commentCount = 0L;
+    private Long commentCount = 0L; // Both platforms
     
     @Column(name = "share_count")
-    private Long shareCount = 0L;
+    private Long shareCount = 0L; // Both platforms
     
     @Column(name = "like_count")
-    private Long likeCount = 0L;
+    private Long likeCount = 0L; // YouTube only
     
     @Column(name = "view_count")
-
-    private Long viewCount = 0L;
+    private Long viewCount = 0L; // YouTube only
     
-    // Calculated field
+    // Calculated engagement score
     @Column(name = "engagement_score")
     private Double engagementScore = 0.0;
     
     // Platform-specific context fields
-    @Column(name = "subreddit", length = 100) // Reddit
+    @Column(name = "subreddit", length = 100) // Reddit only
     private String subreddit;
     
-    @Column(name = "video_id", length = 500)
+    @Column(name = "video_id", length = 500) // YouTube only
     @Size(max = 500, message = "Video ID must be less than 500 characters")
-    private String videoId; // YouTube
+    private String videoId;
     
+    @Column(name = "url", length = 1000) // External URL
+    private String url;
+    
+    // Content analysis collections
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "post_hashtags", joinColumns = @JoinColumn(name = "post_id"))
     @Column(name = "hashtag")
     private Set<String> hashtags = new HashSet<>();
     
-    // Simplified relationship - no cascades, lazy loading
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "post_mentions", joinColumns = @JoinColumn(name = "post_id"))
+    @Column(name = "mention")
+    private Set<String> mentions = new HashSet<>();
+    
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "post_topics", joinColumns = @JoinColumn(name = "post_id"))
+    @Column(name = "topic")
+    private Set<String> topicTags = new HashSet<>();
+    
+    // Sentiment relationship
     @OneToOne(mappedBy = "socialPost", fetch = FetchType.LAZY)
     private SentimentData sentimentData;
     
@@ -114,13 +130,14 @@ public class SocialPost {
         this.ingestedAt = LocalDateTime.now();
     }
     
-    public SocialPost(Platform platform, String externalId, String title, String content, String author, LocalDateTime createdAt) {
+    public SocialPost(Platform platform, String externalId, String title, String content, String author) {
         this();
         this.platform = platform;
         this.externalId = externalId;
-        this.title = title; // Can be null for Twitter
+        this.title = title;
         this.content = content;
         this.author = author;
+        this.createdAt = LocalDateTime.now();
         this.contentHash = generateContentHash(content);
     }
     
@@ -134,7 +151,7 @@ public class SocialPost {
     }
     
     private String generateContentHash(String content) {
-        if (content == null) return null;
+        if (content == null || content.trim().isEmpty()) return null;
         return DigestUtils.md5DigestAsHex(content.toLowerCase().trim().getBytes());
     }
     
@@ -148,41 +165,53 @@ public class SocialPost {
             case REDDIT:
                 score = calculateRedditEngagement();
                 break;
-            case TWITTER:
-                score = calculateTwitterEngagement();
-                break;
             case YOUTUBE:
                 score = calculateYouTubeEngagement();
                 break;
         }
         
-        // Normalize by content length (longer content gets slightly lower scores)
-        double contentFactor = Math.max(0.5, 1.0 - (content.length() / 10000.0));
+        // Normalize by content length factor (longer content might get less engagement)
+        double contentFactor = 1.0;
+        if (content != null) {
+            contentFactor = Math.max(0.5, 1.0 - (content.length() / 20000.0));
+        }
+        
         this.engagementScore = Math.round(score * contentFactor * 100.0) / 100.0;
     }
     
     private double calculateRedditEngagement() {
-        double score = 0.0;
-        if (upvotes != null) score += upvotes * 1.0;
-        if (downvotes != null) score -= downvotes * 0.5;
-        if (commentCount != null) score += commentCount * 2.0;
+        long upvotes = this.upvotes != null ? this.upvotes : 0;
+        long comments = this.commentCount != null ? this.commentCount : 0;
+        
+        // Reddit formula: upvotes + (comments * 2.5) - higher weight for comments
+        double score = upvotes + (comments * 2.5);
+        
+        // Logarithmic scaling for very high scores
+        if (score > 1000) {
+            score = 1000 + Math.log10(score - 999) * 100;
+        }
+        
         return Math.max(0, score);
     }
     
-    private double calculateTwitterEngagement() {
-        double score = 0.0;
-        if (likeCount != null) score += likeCount * 0.5;
-        if (commentCount != null) score += commentCount * 2.0;
-        if (shareCount != null) score += shareCount * 3.0;
-        return score;
-    }
-    
     private double calculateYouTubeEngagement() {
-        double score = 0.0;
-        if (likeCount != null) score += likeCount * 1.0;
-        if (commentCount != null) score += commentCount * 2.5;
-        if (viewCount != null) score += viewCount * 0.01;
-        return score;
+        long likes = this.likeCount != null ? this.likeCount : 0;
+        long comments = this.commentCount != null ? this.commentCount : 0;
+        long views = this.viewCount != null ? this.viewCount : 0;
+        
+        if (views == 0) {
+            // If no views, base score on likes and comments only
+            return (likes * 1.5) + (comments * 3.0);
+        }
+        
+        // YouTube formula: engagement rate * views + base engagement
+        double engagementRate = ((double) (likes + comments)) / views;
+        double baseEngagement = (likes * 1.5) + (comments * 3.0);
+        
+        // Scale engagement rate and combine with base
+        double score = (engagementRate * views * 0.1) + baseEngagement;
+        
+        return Math.max(0, score);
     }
     
     /**
@@ -194,13 +223,37 @@ public class SocialPost {
     }
     
     /**
-     * Check if post has high engagement
+     * Check if post has high engagement (platform-specific thresholds)
      */
     public boolean isHighEngagement() {
-        return engagementScore != null && engagementScore > 100.0;
+        if (engagementScore == null) return false;
+        
+        switch (platform) {
+            case REDDIT:
+                return engagementScore > 500.0; // High threshold for Reddit
+            case YOUTUBE:
+                return engagementScore > 1000.0; // Higher threshold for YouTube
+            default:
+                return engagementScore > 100.0;
+        }
     }
     
-    // Getters and Setters (no business logic here)
+    /**
+     * Validate platform-specific requirements
+     */
+    public boolean isValidForPlatform() {
+        switch (platform) {
+            case REDDIT:
+                return subreddit != null && !subreddit.trim().isEmpty() &&
+                       content != null && !content.trim().isEmpty();
+            case YOUTUBE:
+                return videoId != null && !videoId.trim().isEmpty();
+            default:
+                return false;
+        }
+    }
+    
+    // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     
@@ -225,17 +278,14 @@ public class SocialPost {
     public LocalDateTime getIngestedAt() { return ingestedAt; }
     public void setIngestedAt(LocalDateTime ingestedAt) { this.ingestedAt = ingestedAt; }
     
-    public Long getLikeCount() { return likeCount; }
-    public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
+    public LocalDateTime getProcessedAt() { return processedAt; }
+    public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }
     
-    public Long getCommentCount() { return commentCount; }
-    public void setCommentCount(Long commentCount) { this.commentCount = commentCount; }
+    public String getContentHash() { return contentHash; }
+    public void setContentHash(String contentHash) { this.contentHash = contentHash; }
     
     public Long getUpvotes() { return upvotes; }
     public void setUpvotes(Long upvotes) { this.upvotes = upvotes; }
-    
-    public Long getDownvotes() { return downvotes; }
-    public void setDownvotes(Long downvotes) { this.downvotes = downvotes; }
     
     public Long getCommentCount() { return commentCount; }
     public void setCommentCount(Long commentCount) { this.commentCount = commentCount; }
@@ -258,6 +308,9 @@ public class SocialPost {
     public String getVideoId() { return videoId; }
     public void setVideoId(String videoId) { this.videoId = videoId; }
     
+    public String getUrl() { return url; }
+    public void setUrl(String url) { this.url = url; }
+    
     public Set<String> getHashtags() { return hashtags; }
     public void setHashtags(Set<String> hashtags) { this.hashtags = hashtags; }
     
@@ -269,42 +322,6 @@ public class SocialPost {
     
     public SentimentData getSentimentData() { return sentimentData; }
     public void setSentimentData(SentimentData sentimentData) { this.sentimentData = sentimentData; }
-    
-    // Legacy compatibility methods
-    @Deprecated
-    public String getPostId() { return externalId; }
-    @Deprecated
-    public void setPostId(String postId) { this.externalId = postId; }
-    
-    @Deprecated
-    public Long getScore() { return upvotes; }
-    @Deprecated
-    public void setScore(Long score) { this.upvotes = score; }
-    
-    @Deprecated
-    public Long getCommentsCount() { return commentCount; }
-    @Deprecated
-    public void setCommentsCount(Long commentsCount) { this.commentCount = commentsCount; }
-    
-    @Deprecated
-    public Long getLikesCount() { return likeCount; }
-    @Deprecated
-    public void setLikesCount(Long likesCount) { this.likeCount = likesCount; }
-    
-    @Deprecated
-    public Long getSharesCount() { return shareCount; }
-    @Deprecated
-    public void setSharesCount(Long sharesCount) { this.shareCount = sharesCount; }
-    
-    @Deprecated
-    public Long getViewsCount() { return viewCount; }
-    @Deprecated
-    public void setViewsCount(Long viewsCount) { this.viewCount = viewsCount; }
-    
-    @Deprecated
-    public LocalDateTime getIngestionTime() { return ingestedAt; }
-    @Deprecated
-    public void setIngestionTime(LocalDateTime ingestionTime) { this.ingestedAt = ingestionTime; }
     
     @Override
     public boolean equals(Object o) {
@@ -326,10 +343,10 @@ public class SocialPost {
                 "id=" + id +
                 ", platform=" + platform +
                 ", externalId='" + externalId + '\'' +
+                ", title='" + title + '\'' +
                 ", author='" + author + '\'' +
                 ", subreddit='" + subreddit + '\'' +
                 ", videoId='" + videoId + '\'' +
-
                 ", engagementScore=" + engagementScore +
                 '}';
     }

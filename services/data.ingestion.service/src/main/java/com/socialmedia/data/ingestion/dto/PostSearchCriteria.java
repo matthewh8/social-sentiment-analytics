@@ -8,7 +8,7 @@ import java.util.List;
 
 public class PostSearchCriteria {
     
-    // Platform filtering
+    // Platform filtering (Reddit/YouTube only)
     private List<Platform> platforms;
     
     // Time range filtering
@@ -18,7 +18,8 @@ public class PostSearchCriteria {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime endDate;
     
-    // Content filtering
+    // Content filtering (both platforms have titles in 2025)
+    private String titleKeyword;
     private String contentKeyword;
     private List<String> hashtags;
     private List<String> mentions;
@@ -29,15 +30,17 @@ public class PostSearchCriteria {
     private List<String> authors;
     
     // Platform-specific filtering
-    private String subreddit;
-    private List<String> subreddits;
-    private String videoId;
+    private String subreddit; // Reddit only
+    private List<String> subreddits; // Reddit only
+    private String videoId; // YouTube only
     
-    // Engagement filtering
-    private Integer minUpvotes;
-    private Integer maxUpvotes;
-    private Long minLikesCount;
-    private Long maxLikesCount;
+    // Engagement filtering (no downvotes as of 2025)
+    private Integer minUpvotes; // Reddit only
+    private Integer maxUpvotes; // Reddit only
+    private Long minLikesCount; // YouTube only
+    private Long maxLikesCount; // YouTube only
+    private Long minViewCount; // YouTube only
+    private Long maxViewCount; // YouTube only
     private Double minEngagementScore;
     private Double maxEngagementScore;
     
@@ -84,6 +87,11 @@ public class PostSearchCriteria {
             return this;
         }
         
+        public PostSearchCriteriaBuilder titleKeyword(String keyword) {
+            criteria.titleKeyword = keyword;
+            return this;
+        }
+        
         public PostSearchCriteriaBuilder contentKeyword(String keyword) {
             criteria.contentKeyword = keyword;
             return this;
@@ -101,6 +109,11 @@ public class PostSearchCriteria {
         
         public PostSearchCriteriaBuilder subreddit(String subreddit) {
             criteria.subreddit = subreddit;
+            return this;
+        }
+        
+        public PostSearchCriteriaBuilder videoId(String videoId) {
+            criteria.videoId = videoId;
             return this;
         }
         
@@ -139,6 +152,17 @@ public class PostSearchCriteria {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             return false;
         }
+        // Validate platform-specific criteria
+        if (platforms != null) {
+            for (Platform platform : platforms) {
+                if (platform == Platform.REDDIT && videoId != null) {
+                    return false; // Reddit doesn't have video IDs
+                }
+                if (platform == Platform.YOUTUBE && (subreddit != null || subreddits != null)) {
+                    return false; // YouTube doesn't have subreddits
+                }
+            }
+        }
         return true;
     }
     
@@ -151,6 +175,9 @@ public class PostSearchCriteria {
     
     public LocalDateTime getEndDate() { return endDate; }
     public void setEndDate(LocalDateTime endDate) { this.endDate = endDate; }
+    
+    public String getTitleKeyword() { return titleKeyword; }
+    public void setTitleKeyword(String titleKeyword) { this.titleKeyword = titleKeyword; }
     
     public String getContentKeyword() { return contentKeyword; }
     public void setContentKeyword(String contentKeyword) { this.contentKeyword = contentKeyword; }
@@ -190,6 +217,12 @@ public class PostSearchCriteria {
     
     public Long getMaxLikesCount() { return maxLikesCount; }
     public void setMaxLikesCount(Long maxLikesCount) { this.maxLikesCount = maxLikesCount; }
+    
+    public Long getMinViewCount() { return minViewCount; }
+    public void setMinViewCount(Long minViewCount) { this.minViewCount = minViewCount; }
+    
+    public Long getMaxViewCount() { return maxViewCount; }
+    public void setMaxViewCount(Long maxViewCount) { this.maxViewCount = maxViewCount; }
     
     public Double getMinEngagementScore() { return minEngagementScore; }
     public void setMinEngagementScore(Double minEngagementScore) { this.minEngagementScore = minEngagementScore; }

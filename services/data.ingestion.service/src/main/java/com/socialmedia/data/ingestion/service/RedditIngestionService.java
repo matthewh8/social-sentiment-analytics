@@ -18,9 +18,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
- * Simplified Reddit ingestion service for MVP
- * Removed: complex session tracking, advanced statistics, batch processing optimizations
- * Kept: core ingestion, basic conversion, simple duplicate filtering
+ * Simplified Reddit ingestion service for MVP (2025 version)
+ * - Removed Twitter references
+ * - Both Reddit and YouTube have titles as of 2025
+ * - No downvotes (deprecated in 2025)
+ * - Focused on core ingestion functionality
  */
 @Service
 public class RedditIngestionService {
@@ -71,41 +73,7 @@ public class RedditIngestionService {
     }
     
     /**
-     * 🔄 DATA CONVERSION: RedditPost → SocialPost
-     */
-    private SocialPost convertToSocialPost(RedditPost redditPost) {
-        // Create using new constructor and Platform enum
-        SocialPost socialPost = new SocialPost(
-            Platform.REDDIT,
-            redditPost.getId(),
-            redditPost.getContent(),
-            redditPost.getAuthor()
-        );
-        
-        // Set additional fields
-        socialPost.setTitle(redditPost.getTitle());
-        socialPost.setUrl(redditPost.getUrl());
-        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore().longValue() : 0L);
-        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments().longValue() : 0L);
-        socialPost.setSubreddit(redditPost.getSubreddit());
-                
-        // Convert Reddit timestamp (Unix epoch) to LocalDateTime
-        if (redditPost.getCreatedUtc() != null) {
-            LocalDateTime createdAt = LocalDateTime.ofInstant(
-                Instant.ofEpochSecond(redditPost.getCreatedUtc().longValue()),
-                ZoneId.systemDefault()
-            );
-            socialPost.setCreatedAt(createdAt);
-        }
-        
-        // Calculate engagement score using new method
-        socialPost.calculateEngagementScore();
-        
-        return socialPost;
-    }
-    
-    /**
-     * 🎯 BATCH PROCESSING: Multiple subreddits
+     * Batch processing: Multiple subreddits
      */
     public Mono<Integer> ingestFromMultipleSubreddits(List<String> subreddits, int limitPerSubreddit) {
         logger.info("Starting batch ingestion from {} subreddits", subreddits.size());
@@ -138,6 +106,24 @@ public class RedditIngestionService {
     }
     
     /**
+     * Manual ingestion trigger (for API endpoints)
+     */
+    public Mono<Integer> triggerManualIngestion(String[] subreddits, int postsPerSubreddit) {
+        logger.info("Manual ingestion triggered for {} subreddits", subreddits.length);
+        
+        List<String> subredditList = List.of(subreddits);
+        return ingestFromMultipleSubreddits(subredditList, postsPerSubreddit);
+    }
+    
+    /**
+     * Ingest trending posts from r/popular
+     */
+    public Mono<Integer> ingestTrendingPosts(int limit) {
+        logger.info("Ingesting trending posts from r/popular, limit: {}", limit);
+        return ingestFromSubreddit("popular", limit);
+    }
+    
+    /**
      * Simple test ingestion
      */
     public Mono<Integer> testIngestion() {
@@ -162,51 +148,67 @@ public class RedditIngestionService {
         return new IngestionStats(totalPosts, redditPosts, recentPosts, sessionCounter.get());
     }
     
-    // ===== PRIVATE HELPER METHODS =====
-    
     /**
-     * Convert RedditPost to SocialPost entity (simplified)
+     * Convert RedditPost to SocialPost entity (2025 version)
+     * - Both platforms have titles in 2025
+     * - No downvotes
+     * - Proper error handling for missing fields
      */
     private SocialPost convertToSocialPost(RedditPost redditPost) {
-        SocialPost socialPost = new SocialPost();
+        // Basic validation
+        if (redditPost.getId() == null || redditPost.getId().trim().isEmpty()) {
+            logger.warn("Skipping Reddit post with null/empty ID");
+            throw new IllegalArgumentException("Reddit post ID cannot be null or empty");
+        }
         
-        // Basic fields
-        socialPost.setPlatform(Platform.REDDIT);
-        socialPost.setExternalId(redditPost.getId());
-        socialPost.setTitle(redditPost.getTitle());
-        socialPost.setContent(redditPost.getContent());
-        socialPost.setAuthor(redditPost.getAuthor());
-        socialPost.setSubreddit(redditPost.getSubreddit());
+        // Create using constructor (Platform, external ID, title, content, author)
+        String title = redditPost.getTitle();
+        if (title == null || title.trim().isEmpty()) {
+            logger.warn("Reddit post {} has no title, using fallback", redditPost.getId());
+            title = "[No Title]"; // Fallback for edge cases
+        }
         
-        // Engagement metrics
-        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore().longValue() : 0L);
-        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments().longValue() : 0L);
+        String content = redditPost.getContent();
+        if (content == null) {
+            content = ""; // Empty content is acceptable for link posts
+        }
         
-        // Convert timestamp
+        String author = redditPost.getAuthor();
+        if (author == null || author.trim().isEmpty()) {
+            author = "[Unknown]"; // Fallback for deleted authors
+        }
+        
+        SocialPost socialPost = new SocialPost(
+            Platform.REDDIT,
+            redditPost.getId(),
+            title,
+            content,
+            author
+        );
+        
+        // Set additional Reddit-specific fields
+        socialPost.setUrl(redditPost.getUrl());
+        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore() : 0L);
+        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments() : 0L);
+        socialPost.setSubreddit(redditPost.getSubreddit() != null ? redditPost.getSubreddit() : "unknown");
+                
+        // Convert Reddit timestamp (Unix epoch) to LocalDateTime
         if (redditPost.getCreatedUtc() != null) {
             LocalDateTime createdAt = LocalDateTime.ofInstant(
                 Instant.ofEpochSecond(redditPost.getCreatedUtc()),
                 ZoneId.systemDefault()
             );
             socialPost.setCreatedAt(createdAt);
+        } else {
+            // Fallback to current time if timestamp is missing
+            socialPost.setCreatedAt(LocalDateTime.now());
+            logger.warn("Reddit post {} missing timestamp, using current time", redditPost.getId());
         }
         
-        // Calculate simple engagement score
-        socialPost.setEngagementScore(calculateSimpleEngagement(socialPost));
+        // Calculate engagement score using the entity's method
+        socialPost.calculateEngagementScore();
         
         return socialPost;
-    }
-    
-    /**
-     * Simple engagement score calculation
-     */
-    private double calculateSimpleEngagement(SocialPost post) {
-        long upvotes = post.getUpvotes() != null ? post.getUpvotes() : 0;
-        long comments = post.getCommentCount() != null ? post.getCommentCount() : 0;
-        
-        // Simple formula: upvotes + (comments * 2), normalized to 0-100
-        double score = upvotes + (comments * 2);
-        return Math.max(0, Math.min(100, score / 10));
     }
     
     /**

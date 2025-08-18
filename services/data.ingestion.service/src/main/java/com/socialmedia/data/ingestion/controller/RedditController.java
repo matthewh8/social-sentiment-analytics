@@ -1,3 +1,4 @@
+// src/main/java/com/socialmedia/data/ingestion/controller/RedditController.java
 package com.socialmedia.data.ingestion.controller;
 
 import com.socialmedia.data.ingestion.service.RedditIngestionService;
@@ -9,13 +10,11 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Simplified Reddit Controller for MVP
- * Removed: Complex configuration endpoints, detailed error handling
- * Kept: Essential ingestion triggers and health monitoring
+ * REST Controller for Reddit data ingestion operations
+ * Provides endpoints for manual triggering, monitoring, and statistics
  */
 @RestController
 @RequestMapping("/api/reddit")
@@ -37,54 +36,54 @@ public class RedditController {
             @RequestParam(defaultValue = "technology,programming") String subreddits,
             @RequestParam(defaultValue = "25") int postsPerSubreddit) {
         
-        logger.info("Manual ingestion triggered for subreddits: {}", subreddits);
+        logger.info("Manual ingestion triggered via API for subreddits: {}", subreddits);
         
-        List<String> subredditList = List.of(subreddits.split(","));
+        String[] subredditArray = subreddits.split(",");
         
-        return ingestionService.ingestFromMultipleSubreddits(subredditList, postsPerSubreddit)
+        return ingestionService.triggerManualIngestion(subredditArray, postsPerSubreddit)
             .map(count -> {
                 Map<String, Object> response = new HashMap<>();
                 response.put("status", "success");
                 response.put("message", "Ingestion completed");
                 response.put("postsIngested", count);
-                response.put("subreddits", subredditList);
+                response.put("subreddits", subredditArray);
                 return ResponseEntity.ok(response);
             })
             .onErrorResume(error -> {
-                logger.error("Ingestion failed: {}", error.getMessage());
                 Map<String, Object> errorResponse = new HashMap<>();
                 errorResponse.put("status", "error");
-                errorResponse.put("message", "Ingestion failed: " + error.getMessage());
+                errorResponse.put("message", "Ingestion failed");
                 return Mono.just(ResponseEntity.status(500).body(errorResponse));
             });
     }
     
     /**
-     * Test ingestion with default subreddits
+     * Ingest trending posts from r/popular
      */
-    @PostMapping("/test")
-    public Mono<ResponseEntity<Map<String, Object>>> testIngestion() {
-        logger.info("Test ingestion triggered");
+    @PostMapping("/trending")
+    public Mono<ResponseEntity<Map<String, Object>>> ingestTrending(
+            @RequestParam(defaultValue = "50") int limit) {
         
-        return ingestionService.testIngestion()
+        logger.info("Trending posts ingestion triggered via API, limit: {}", limit);
+        
+        return ingestionService.ingestTrendingPosts(limit)
             .map(count -> {
                 Map<String, Object> response = new HashMap<>();
                 response.put("status", "success");
-                response.put("message", "Test ingestion completed");
+                response.put("message", "Trending posts ingestion completed");
                 response.put("postsIngested", count);
                 return ResponseEntity.ok(response);
             })
             .onErrorResume(error -> {
-                logger.error("Test ingestion failed: {}", error.getMessage());
                 Map<String, Object> errorResponse = new HashMap<>();
                 errorResponse.put("status", "error");
-                errorResponse.put("message", "Test ingestion failed");
+                errorResponse.put("message", "Trending ingestion failed");
                 return Mono.just(ResponseEntity.status(500).body(errorResponse));
             });
     }
     
     /**
-     * Get basic ingestion statistics
+     * Get ingestion statistics and health status
      */
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Object>> getStats() {
@@ -93,11 +92,15 @@ public class RedditController {
         try {
             IngestionStats stats = ingestionService.getIngestionStats();
             
+            Map<String, Object> statistics = new HashMap<>();
+            statistics.put("totalPosts", stats.getTotalPosts());
+            statistics.put("redditPosts", stats.getRedditPosts());
+            statistics.put("recentPosts24h", stats.getRecentPosts());
+            statistics.put("sessionTotal", stats.getSessionTotal());
+            
             Map<String, Object> response = new HashMap<>();
             response.put("status", "healthy");
-            response.put("totalPosts", stats.getTotalPosts());
-            response.put("redditPosts", stats.getRedditPosts());
-            response.put("recentPosts24h", stats.getRecentPosts());
+            response.put("statistics", statistics);
             response.put("timestamp", System.currentTimeMillis());
             
             return ResponseEntity.ok(response);
@@ -113,14 +116,30 @@ public class RedditController {
     }
     
     /**
-     * Simple health check
+     * Health check endpoint
      */
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> healthCheck() {
         Map<String, String> response = new HashMap<>();
         response.put("status", "UP");
-        response.put("service", "Reddit Ingestion Service");
+        response.put("service", "Reddit Data Ingestion");
         response.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Get service configuration info
+     */
+    @GetMapping("/config")
+    public ResponseEntity<Map<String, Object>> getConfig() {
+        // Note: In production, be careful about exposing sensitive config
+        Map<String, Object> response = new HashMap<>();
+        response.put("schedulingEnabled", true);
+        response.put("schedulingInterval", "5 minutes");
+        response.put("rateLimitEnabled", true);
+        response.put("retryEnabled", true);
+        response.put("maxRetries", 3);
         
         return ResponseEntity.ok(response);
     }

@@ -5,20 +5,19 @@ import com.socialmedia.data.ingestion.model.SocialPost;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-// Suggested organization improvements for SocialPostRepository.java
-
 /**
- * Simplified repository for SocialPost entities - MVP version
- * Removed: complex analytics, cross-platform comparisons, batch operations
- * Kept: essential CRUD, basic search, simple analytics
+ * Repository for SocialPost entities - Reddit and YouTube focused (2025 version)
+ * Clean MVP version without Twitter, with consistent title handling
  */
 @Repository
 public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
@@ -47,19 +46,6 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     List<SocialPost> findSimilarPosts(@Param("hash") String contentHash, @Param("excludeId") Long excludeId);
     
     // ===== PLATFORM & TIME-BASED QUERIES =====
-
-    
-    /**
-     * Check if post exists by external ID and platform (duplicate detection)
-     */
-    boolean existsByExternalIdAndPlatform(String externalId, Platform platform);
-    
-    /**
-     * Find post by external ID and platform
-     */
-    Optional<SocialPost> findByExternalIdAndPlatform(String externalId, Platform platform);
-    
-    // ===== PLATFORM & TIME-BASED QUERIES =====
     
     /**
      * Find posts by platform with pagination
@@ -77,25 +63,19 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     List<SocialPost> findByPlatformAndCreatedAtAfter(Platform platform, LocalDateTime date);
     
     /**
-     * Find posts by platform and created between dates (no pagination)
+     * Find posts by platform and created between dates
      */
     List<SocialPost> findByPlatformAndCreatedAtBetween(Platform platform, 
                                                       LocalDateTime startDate, 
                                                       LocalDateTime endDate);
     
     /**
-     * Find posts by platform and created between dates with pagination
+     * Find posts by platforms and created between dates with pagination
      */
     Page<SocialPost> findByPlatformInAndCreatedAtBetween(List<Platform> platforms, 
                                                         LocalDateTime startDate, 
                                                         LocalDateTime endDate, 
                                                         Pageable pageable);
-    
-    /**
-     * Find posts created between dates (no pagination)
-     */
-    @Query("SELECT s FROM SocialPost s WHERE s.createdAt BETWEEN :start AND :end ORDER BY s.createdAt DESC")
-    List<SocialPost> findByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
     
     /**
      * Find posts created between dates with pagination
@@ -134,11 +114,11 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     // ===== CONTENT SEARCH & FILTERING =====
     
     /**
-     * Find posts containing keywords in content or title
+     * Find posts containing keywords in title or content (both platforms have titles)
      */
     @Query("SELECT s FROM SocialPost s WHERE " +
-           "(LOWER(s.content) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-           " LOWER(s.title) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
+           "(LOWER(s.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           " LOWER(s.content) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
            "s.platform = :platform " +
            "ORDER BY s.engagementScore DESC")
     List<SocialPost> findByContentContainingAndPlatform(@Param("keyword") String keyword, 
@@ -157,13 +137,50 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     @Query("SELECT DISTINCT s FROM SocialPost s JOIN s.hashtags h WHERE h = :hashtag ORDER BY s.createdAt DESC")
     List<SocialPost> findByHashtag(@Param("hashtag") String hashtag);
     
-    // ===== ENGAGEMENT & TRENDING ANALYSIS =====
-
+    // ===== REDDIT-SPECIFIC QUERIES =====
     
     /**
      * Find posts by subreddit
      */
     List<SocialPost> findBySubreddit(String subreddit, Pageable pageable);
+    
+    /**
+     * Get subreddit statistics (Reddit only)
+     */
+    @Query("SELECT s.subreddit, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
+           "FROM SocialPost s " +
+           "WHERE s.platform = 'REDDIT' AND s.subreddit IS NOT NULL " +
+           "GROUP BY s.subreddit " +
+           "ORDER BY avgEngagement DESC")
+    List<Object[]> getSubredditStats();
+    
+    /**
+     * Reddit-specific: Find posts with high upvote counts
+     */
+    @Query("SELECT s FROM SocialPost s WHERE " +
+           "s.platform = 'REDDIT' AND " +
+           "s.upvotes > :minUpvotes " +
+           "ORDER BY s.upvotes DESC")
+    List<SocialPost> findHighUpvotePosts(@Param("minUpvotes") Long minUpvotes, Pageable pageable);
+    
+    // ===== YOUTUBE-SPECIFIC QUERIES =====
+    
+    /**
+     * Find YouTube posts by video ID
+     */
+    @Query("SELECT s FROM SocialPost s WHERE s.platform = 'YOUTUBE' AND s.videoId = :videoId")
+    Optional<SocialPost> findByVideoId(@Param("videoId") String videoId);
+    
+    /**
+     * Find YouTube posts with high view counts
+     */
+    @Query("SELECT s FROM SocialPost s WHERE " +
+           "s.platform = 'YOUTUBE' AND " +
+           "s.viewCount > :minViews " +
+           "ORDER BY s.viewCount DESC")
+    List<SocialPost> findHighViewPosts(@Param("minViews") Long minViews, Pageable pageable);
+    
+    // ===== ENGAGEMENT & TRENDING ANALYSIS =====
     
     /**
      * Find trending posts (high engagement in recent time)
@@ -177,7 +194,15 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
                                       Pageable pageable);
     
     /**
-     * Get average engagement score by platform
+     * Find high engagement posts
+     */
+    @Query("SELECT s FROM SocialPost s WHERE " +
+           "s.engagementScore > :minScore " +
+           "ORDER BY s.engagementScore DESC")
+    List<SocialPost> findHighEngagementPosts(@Param("minScore") Double minScore, Pageable pageable);
+    
+    /**
+     * Get top authors by engagement for a platform
      */
     @Query("SELECT s.author, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
            "FROM SocialPost s " +
@@ -185,52 +210,8 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
            "GROUP BY s.author " +
            "HAVING COUNT(s) > :minPosts " +
            "ORDER BY avgEngagement DESC")
-    List<Object[]> getTopAuthorsByEngagement(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
-    
-    // ===== SIMPLE TRENDING ANALYSIS =====
-    
-    // ===== AUTHOR ANALYTICS =====
-    
-    /**
-     * Get top authors by engagement for a platform
-
-     */
-    @Query("SELECT s.platform, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
-           "FROM SocialPost s " +
-           "WHERE s.createdAt > :since " +
-           "GROUP BY s.platform")
-    List<Object[]> getPlatformComparisonData(@Param("since") LocalDateTime since);
-    
-    /**
-     * Get basic volume statistics
-     */
-    @Query("SELECT " +
-           "COUNT(s) as totalPosts, " +
-           "COUNT(DISTINCT s.author) as uniqueAuthors, " +
-           "AVG(s.engagementScore) as avgEngagement " +
-           "FROM SocialPost s " +
-           "WHERE s.createdAt > :since")
-    Object[] getVolumeStatistics(@Param("since") LocalDateTime since);
-    
-    /**
-     * Get subreddit statistics (Reddit only)
-     */
-    @Query("SELECT s.subreddit, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
-           "FROM SocialPost s " +
-           "WHERE s.platform = 'REDDIT' AND s.subreddit IS NOT NULL " +
-           "GROUP BY s.subreddit " +
-           "ORDER BY avgEngagement DESC")
-    List<Object[]> getSubredditStats();
-    
-    /**
-     * Reddit-specific: Find posts with high upvote ratio
-     */
-    @Query("SELECT s FROM SocialPost s WHERE " +
-           "s.platform = 'REDDIT' AND " +
-           "s.upvotes > 0 AND s.downvotes IS NOT NULL AND " +
-           "(s.upvotes * 1.0 / (s.upvotes + s.downvotes)) > :ratio " +
-           "ORDER BY s.upvotes DESC")
-    List<SocialPost> findHighUpvoteRatioPosts(@Param("ratio") Double ratio, Pageable pageable);
+    List<Object[]> getTopAuthorsByEngagement(@Param("platform") Platform platform, 
+                                           @Param("minPosts") Long minPosts);
     
     // ===== TIME-SERIES & TREND ANALYTICS =====
     
@@ -271,7 +252,7 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     // ===== CROSS-PLATFORM ANALYTICS =====
     
     /**
-     * Get platform comparison data
+     * Get platform comparison data (Reddit vs YouTube)
      */
     @Query("SELECT s.platform, " +
            "COUNT(s) as postCount, " +
