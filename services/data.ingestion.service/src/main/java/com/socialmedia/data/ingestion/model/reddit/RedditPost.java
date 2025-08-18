@@ -25,10 +25,10 @@ public class RedditPost {
     private Long createdUtc;
     
     @JsonProperty("score")
-    private Integer score;
+    private Long score;
     
     @JsonProperty("num_comments")
-    private Integer numComments;
+    private Long numComments;
     
     @JsonProperty("url")
     private String url;
@@ -61,11 +61,11 @@ public class RedditPost {
     public Long getCreatedUtc() { return createdUtc; }
     public void setCreatedUtc(Long createdUtc) { this.createdUtc = createdUtc; }
     
-    public Integer getScore() { return score; }
-    public void setScore(Integer score) { this.score = score; }
+    public Long getScore() { return score; }
+    public void setScore(Long score) { this.score = score; }
     
-    public Integer getNumComments() { return numComments; }
-    public void setNumComments(Integer numComments) { this.numComments = numComments; }
+    public Long getNumComments() { return numComments; }
+    public void setNumComments(Long numComments) { this.numComments = numComments; }
     
     public String getUrl() { return url; }
     public void setUrl(String url) { this.url = url; }

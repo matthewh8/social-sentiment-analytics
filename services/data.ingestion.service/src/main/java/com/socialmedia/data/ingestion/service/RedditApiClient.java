@@ -1,4 +1,3 @@
-// src/main/java/com/socialmedia/data/ingestion/service/RedditApiClient.java
 package com.socialmedia.data.ingestion.service;
 
 import com.socialmedia.data.ingestion.config.RedditApiConfig;
@@ -9,18 +8,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
- * Enterprise Reddit API Client with comprehensive error handling,
- * rate limiting, and reactive patterns for high-throughput processing
+ * Simplified Reddit API Client for MVP
+ * Removed: complex error handling, performance metrics, multiple endpoint support
+ * Kept: basic API calls, rate limiting, simple error handling
  */
 @Service
 public class RedditApiClient {
@@ -29,33 +26,23 @@ public class RedditApiClient {
     
     private final WebClient webClient;
     private final RateLimiter rateLimiter;
-    private final Retry retrySpec;
     private final RedditApiConfig config;
     
-    public RedditApiClient(WebClient redditWebClient, 
-                          RateLimiter rateLimiter, 
-                          Retry redditApiRetrySpec,
-                          RedditApiConfig config) {
+    public RedditApiClient(WebClient redditWebClient, RateLimiter rateLimiter, RedditApiConfig config) {
         this.webClient = redditWebClient;
         this.rateLimiter = rateLimiter;
-        this.retrySpec = redditApiRetrySpec;
         this.config = config;
     }
     
     /**
-     * Fetch latest posts from a subreddit with rate limiting and error handling
-     * 
-     * @param subreddit The subreddit name (without r/)
-     * @param limit Number of posts to fetch (max 100)
-     * @param after Pagination token for fetching next page
-     * @return Flux of RedditPost objects
+     * Fetch posts from a subreddit (simplified)
      */
     public Flux<RedditPost> fetchSubredditPosts(String subreddit, int limit, String after) {
         logger.info("Fetching {} posts from r/{}", limit, subreddit);
         
         return rateLimiter.acquireToken()
             .then(makeApiCall(subreddit, limit, after))
-            .retryWhen(retrySpec)
+            .retry(2) // Simple retry
             .flatMapMany(this::extractPosts)
             .doOnNext(post -> logger.debug("Fetched post: {} from r/{}", post.getId(), post.getSubreddit()))
             .doOnError(error -> logger.error("Error fetching posts from r/{}: {}", subreddit, error.getMessage()))
@@ -66,48 +53,24 @@ public class RedditApiClient {
     }
     
     /**
-     * Fetch posts from multiple subreddits concurrently
+     * Fetch from multiple subreddits (simplified)
      */
-    public Flux<RedditPost> fetchMultipleSubreddits(List<String> subreddits, int limitPerSubreddit) {
-        logger.info("Fetching posts from {} subreddits: {}", subreddits.size(), subreddits);
+    public Flux<RedditPost> fetchMultipleSubreddits(java.util.List<String> subreddits, int limitPerSubreddit) {
+        logger.info("Fetching posts from {} subreddits", subreddits.size());
         
         return Flux.fromIterable(subreddits)
             .flatMap(subreddit -> fetchSubredditPosts(subreddit, limitPerSubreddit, null)
                 .onErrorResume(error -> {
-                    logger.warn("Failed to fetch from r/{}, continuing with others: {}", subreddit, error.getMessage());
+                    logger.warn("Failed to fetch from r/{}: {}", subreddit, error.getMessage());
                     return Flux.empty();
-                }), 3) // Concurrency level of 3 to respect rate limits
+                }), 2) // Concurrency level of 2 (conservative)
             .doOnComplete(() -> logger.info("Completed fetching from all subreddits"));
     }
     
-    /**
-     * Fetch trending posts from r/popular or r/all
-     */
-    public Flux<RedditPost> fetchTrendingPosts(String category, int limit) {
-        String endpoint = switch (category.toLowerCase()) {
-            case "popular" -> "/r/popular.json";
-            case "all" -> "/r/all.json";
-            default -> "/r/popular.json";
-        };
-        
-        logger.info("Fetching {} trending posts from {}", limit, endpoint);
-        
-        return rateLimiter.acquireToken()
-            .then(webClient.get()
-                .uri(uriBuilder -> uriBuilder
-                    .path(endpoint)
-                    .queryParam("limit", Math.min(limit, 100))
-                    .queryParam("raw_json", 1)
-                    .build())
-                .retrieve()
-                .bodyToMono(RedditResponse.class))
-            .retryWhen(retrySpec)
-            .flatMapMany(this::extractPosts)
-            .doOnNext(post -> logger.debug("Fetched trending post: {}", post.getId()));
-    }
+    // ===== PRIVATE HELPER METHODS =====
     
     /**
-     * Make the actual API call to Reddit
+     * Make the actual API call to Reddit (simplified)
      */
     private Mono<RedditResponse> makeApiCall(String subreddit, int limit, String after) {
         return webClient.get()
@@ -125,25 +88,23 @@ public class RedditApiClient {
             })
             .retrieve()
             .onStatus(status -> status == HttpStatus.TOO_MANY_REQUESTS, response -> {
-                logger.warn("Rate limited by Reddit API, will retry");
+                logger.warn("Rate limited by Reddit API");
                 return Mono.error(new RedditApiException("Rate limited"));
             })
             .onStatus(status -> status.is4xxClientError(), response -> {
                 logger.error("Client error from Reddit API: {}", response.statusCode());
-                return response.bodyToMono(String.class)
-                    .flatMap(body -> Mono.error(new RedditApiException("Client error: " + body)));
+                return Mono.error(new RedditApiException("Client error: " + response.statusCode()));
             })
             .onStatus(status -> status.is5xxServerError(), response -> {
                 logger.error("Server error from Reddit API: {}", response.statusCode());
                 return Mono.error(new RedditApiException("Server error: " + response.statusCode()));
             })
             .bodyToMono(RedditResponse.class)
-            .doOnSuccess(response -> logger.debug("Successfully fetched Reddit API response"))
-            .timeout(Duration.ofMillis(config.getReadTimeoutMs()));
+            .timeout(Duration.ofSeconds(30)); // Simple timeout
     }
     
     /**
-     * Extract posts from Reddit API response
+     * Extract posts from Reddit API response (simplified)
      */
     private Flux<RedditPost> extractPosts(RedditResponse response) {
         if (response == null || response.getData() == null || response.getData().getChildren() == null) {
@@ -153,12 +114,11 @@ public class RedditApiClient {
         
         return Flux.fromIterable(response.getData().getChildren())
             .map(child -> child.getData())
-            .filter(this::isValidPost)
-            .doOnNext(post -> logger.trace("Processing post: {} - {}", post.getId(), post.getTitle()));
+            .filter(this::isValidPost);
     }
     
     /**
-     * Validate post data quality
+     * Basic post validation
      */
     private boolean isValidPost(RedditPost post) {
         if (post == null) return false;
@@ -168,13 +128,13 @@ public class RedditApiClient {
             return false;
         }
         
-        // Filter out posts without meaningful content
+        // Must have some content
         if ((post.getTitle() == null || post.getTitle().trim().isEmpty()) &&
             (post.getContent() == null || post.getContent().trim().isEmpty())) {
             return false;
         }
         
-        // Skip NSFW content for sentiment analysis
+        // Skip NSFW for MVP
         if (Boolean.TRUE.equals(post.getOver18())) {
             return false;
         }
@@ -183,15 +143,11 @@ public class RedditApiClient {
     }
     
     /**
-     * Custom exception for Reddit API errors
+     * Simple exception for Reddit API errors
      */
     public static class RedditApiException extends RuntimeException {
         public RedditApiException(String message) {
             super(message);
-        }
-        
-        public RedditApiException(String message, Throwable cause) {
-            super(message, cause);
         }
     }
 }

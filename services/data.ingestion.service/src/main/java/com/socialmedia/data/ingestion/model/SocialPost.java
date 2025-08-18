@@ -4,26 +4,22 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.hibernate.annotations.CreationTimestamp;
-import org.springframework.util.DigestUtils;
 
 import java.time.LocalDateTime;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 
+/**
+ *  SocialPost entity
+*/
 @Entity
 @Table(name = "social_posts", 
        indexes = {
-           @Index(name = "idx_platform_timestamp", columnList = "platform, createdAt"),
-           @Index(name = "idx_author_platform", columnList = "author, platform"),
-           @Index(name = "idx_content_hash", columnList = "contentHash"),
-           @Index(name = "idx_external_id_platform", columnList = "externalId, platform", unique = true),
-           @Index(name = "idx_engagement_score", columnList = "engagementScore"),
-           @Index(name = "idx_created_at", columnList = "createdAt"),
-           @Index(name = "idx_ingestion_time", columnList = "ingestedAt")
+           @Index(name = "idx_platform_created", columnList = "platform, createdAt"),
+           @Index(name = "idx_external_platform", columnList = "externalId, platform", unique = true),
+           @Index(name = "idx_engagement", columnList = "engagementScore")
        },
        uniqueConstraints = {
-           @UniqueConstraint(name = "uk_external_id_platform", columnNames = {"externalId", "platform"})
+           @UniqueConstraint(name = "uk_external_platform", columnNames = {"externalId", "platform"})
        })
 public class SocialPost {
     
@@ -31,6 +27,7 @@ public class SocialPost {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
+    // Core identification
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @NotNull(message = "Platform cannot be null")
@@ -41,13 +38,14 @@ public class SocialPost {
     @Size(min = 1, max = 100, message = "External ID must be between 1 and 100 characters")
     private String externalId;
     
-    @Column(length = 500)
+    // Content
+    @Column(length = 500) // Reddit titles, YouTube titles (nullable for Twitter)
     @Size(max = 500, message = "Title must be less than 500 characters")
     private String title;
     
     @Column(columnDefinition = "TEXT")
     @NotNull(message = "Content cannot be null")
-    @Size(min = 1, max = 5000, message = "Content must be between 1 and 5000 characters")
+    @Size(min = 1, max = 10000, message = "Content must be between 1 and 10000 characters")
     private String content;
     
     @Column(nullable = false, length = 100)
@@ -55,14 +53,7 @@ public class SocialPost {
     @Size(min = 1, max = 100, message = "Author name must be between 1 and 100 characters")
     private String author;
     
-    @Column(name = "author_id", length = 100)
-    @Size(max = 100, message = "Author ID must be less than 100 characters")
-    private String authorId;
-    
-    @Column(length = 500)
-    @Size(max = 500, message = "URL must be less than 500 characters")
-    private String url;
-    
+    // Timestamps
     @Column(name = "created_at", nullable = false)
     @NotNull(message = "Created date cannot be null")
     private LocalDateTime createdAt;
@@ -71,55 +62,37 @@ public class SocialPost {
     @CreationTimestamp
     private LocalDateTime ingestedAt;
     
-    @Column(name = "processed_at")
-    private LocalDateTime processedAt;
+    // Universal engagement metrics (work for all platforms)
+    @Column(name = "like_count")
+    private Long likeCount = 0L;
     
-    @Column(name = "content_hash", nullable = false, length = 64)
-    private String contentHash;
+    @Column(name = "comment_count")
+    private Long commentCount = 0L;
     
-    // Multi-platform engagement metrics
-    @Column(name = "upvotes")
-    private Integer upvotes = 0;
+    @Column(name = "share_count")
+    private Long shareCount = 0L;
     
-    @Column(name = "downvotes")
-    private Integer downvotes = 0;
+    // Platform-specific metrics (only when needed)
+    @Column(name = "upvotes") // Reddit only
+    private Long upvotes = 0L;
     
-    @Column(name = "comments_count")
-    private Integer commentsCount = 0;
+    @Column(name = "view_count") // YouTube, TikTok
+    private Long viewCount = 0L;
     
-    @Column(name = "shares_count")
-    private Integer sharesCount = 0;
-    
-    @Column(name = "likes_count")
-    private Integer likesCount = 0;
-    
-    @Column(name = "views_count")
-    private Long viewsCount = 0L;
-    
+    // Calculated field
     @Column(name = "engagement_score")
     private Double engagementScore = 0.0;
     
-    // Platform-specific fields
-    @Column(name = "subreddit", length = 100)
-    private String subreddit; // Reddit
+    // Platform-specific context fields
+    @Column(name = "subreddit", length = 100) // Reddit
+    private String subreddit;
     
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "post_hashtags", joinColumns = @JoinColumn(name = "post_id"))
-    @Column(name = "hashtag")
-    private Set<String> hashtags = new HashSet<>();
+    @Column(name = "video_id", length = 500) // YouTube
+    @Size(max = 500, message = "Video ID must be less than 500 characters")
+    private String videoId;
     
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "post_mentions", joinColumns = @JoinColumn(name = "post_id"))
-    @Column(name = "mention")
-    private Set<String> mentions = new HashSet<>();
-    
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "post_topics", joinColumns = @JoinColumn(name = "post_id"))
-    @Column(name = "topic")
-    private Set<String> topicTags = new HashSet<>();
-    
-    // Relationship to sentiment data
-    @OneToOne(mappedBy = "socialPost", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    // Simplified relationship - no cascades, lazy loading
+    @OneToOne(mappedBy = "socialPost", fetch = FetchType.LAZY)
     private SentimentData sentimentData;
     
     // Constructors
@@ -127,92 +100,17 @@ public class SocialPost {
         this.ingestedAt = LocalDateTime.now();
     }
     
-    public SocialPost(Platform platform, String externalId, String content, String author) {
+    public SocialPost(Platform platform, String externalId, String title, String content, String author, LocalDateTime createdAt) {
         this();
         this.platform = platform;
         this.externalId = externalId;
+        this.title = title; // Can be null for Twitter
         this.content = content;
         this.author = author;
-        this.contentHash = generateContentHash(content);
+        this.createdAt = createdAt;
     }
     
-    // Business methods
-    @PrePersist
-    @PreUpdate
-    private void generateHashIfNeeded() {
-        if (this.contentHash == null && this.content != null) {
-            this.contentHash = generateContentHash(this.content);
-        }
-    }
-    
-    private String generateContentHash(String content) {
-        if (content == null) return null;
-        return DigestUtils.md5DigestAsHex(content.toLowerCase().trim().getBytes());
-    }
-    
-    /**
-     * Calculate engagement score based on platform-specific metrics
-     */
-    public void calculateEngagementScore() {
-        double score = 0.0;
-        
-        switch (platform) {
-            case REDDIT:
-                score = calculateRedditEngagement();
-                break;
-            case TWITTER:
-                score = calculateTwitterEngagement();
-                break;
-            case YOUTUBE:
-                score = calculateYouTubeEngagement();
-                break;
-        }
-        
-        // Normalize by content length (longer content gets slightly lower scores)
-        double contentFactor = Math.max(0.5, 1.0 - (content.length() / 10000.0));
-        this.engagementScore = Math.round(score * contentFactor * 100.0) / 100.0;
-    }
-    
-    private double calculateRedditEngagement() {
-        double score = 0.0;
-        if (upvotes != null) score += upvotes * 1.0;
-        if (downvotes != null) score -= downvotes * 0.5;
-        if (commentsCount != null) score += commentsCount * 2.0;
-        return Math.max(0, score);
-    }
-    
-    private double calculateTwitterEngagement() {
-        double score = 0.0;
-        if (likesCount != null) score += likesCount * 0.5;
-        if (commentsCount != null) score += commentsCount * 2.0;
-        if (sharesCount != null) score += sharesCount * 3.0;
-        return score;
-    }
-    
-    private double calculateYouTubeEngagement() {
-        double score = 0.0;
-        if (likesCount != null) score += likesCount * 1.0;
-        if (commentsCount != null) score += commentsCount * 2.5;
-        if (viewsCount != null) score += viewsCount * 0.01;
-        return score;
-    }
-    
-    /**
-     * Check if this post is a duplicate of another
-     */
-    public boolean isDuplicateOf(SocialPost other) {
-        return Objects.equals(this.contentHash, other.contentHash) && 
-               Objects.equals(this.platform, other.platform);
-    }
-    
-    /**
-     * Check if post has high engagement
-     */
-    public boolean isHighEngagement() {
-        return engagementScore != null && engagementScore > 100.0;
-    }
-    
-    // Getters and Setters
+    // Getters and Setters (no business logic here)
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     
@@ -226,21 +124,10 @@ public class SocialPost {
     public void setTitle(String title) { this.title = title; }
     
     public String getContent() { return content; }
-    public void setContent(String content) { 
-        this.content = content;
-        if (content != null) {
-            this.contentHash = generateContentHash(content);
-        }
-    }
+    public void setContent(String content) { this.content = content; }
     
     public String getAuthor() { return author; }
     public void setAuthor(String author) { this.author = author; }
-    
-    public String getAuthorId() { return authorId; }
-    public void setAuthorId(String authorId) { this.authorId = authorId; }
-    
-    public String getUrl() { return url; }
-    public void setUrl(String url) { this.url = url; }
     
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
@@ -248,29 +135,20 @@ public class SocialPost {
     public LocalDateTime getIngestedAt() { return ingestedAt; }
     public void setIngestedAt(LocalDateTime ingestedAt) { this.ingestedAt = ingestedAt; }
     
-    public LocalDateTime getProcessedAt() { return processedAt; }
-    public void setProcessedAt(LocalDateTime processedAt) { this.processedAt = processedAt; }
+    public Long getLikeCount() { return likeCount; }
+    public void setLikeCount(Long likeCount) { this.likeCount = likeCount; }
     
-    public String getContentHash() { return contentHash; }
-    public void setContentHash(String contentHash) { this.contentHash = contentHash; }
+    public Long getCommentCount() { return commentCount; }
+    public void setCommentCount(Long commentCount) { this.commentCount = commentCount; }
     
-    public Integer getUpvotes() { return upvotes; }
-    public void setUpvotes(Integer upvotes) { this.upvotes = upvotes; }
+    public Long getShareCount() { return shareCount; }
+    public void setShareCount(Long shareCount) { this.shareCount = shareCount; }
     
-    public Integer getDownvotes() { return downvotes; }
-    public void setDownvotes(Integer downvotes) { this.downvotes = downvotes; }
+    public Long getUpvotes() { return upvotes; }
+    public void setUpvotes(Long upvotes) { this.upvotes = upvotes; }
     
-    public Integer getCommentsCount() { return commentsCount; }
-    public void setCommentsCount(Integer commentsCount) { this.commentsCount = commentsCount; }
-    
-    public Integer getSharesCount() { return sharesCount; }
-    public void setSharesCount(Integer sharesCount) { this.sharesCount = sharesCount; }
-    
-    public Integer getLikesCount() { return likesCount; }
-    public void setLikesCount(Integer likesCount) { this.likesCount = likesCount; }
-    
-    public Long getViewsCount() { return viewsCount; }
-    public void setViewsCount(Long viewsCount) { this.viewsCount = viewsCount; }
+    public Long getViewCount() { return viewCount; }
+    public void setViewCount(Long viewCount) { this.viewCount = viewCount; }
     
     public Double getEngagementScore() { return engagementScore; }
     public void setEngagementScore(Double engagementScore) { this.engagementScore = engagementScore; }
@@ -278,39 +156,13 @@ public class SocialPost {
     public String getSubreddit() { return subreddit; }
     public void setSubreddit(String subreddit) { this.subreddit = subreddit; }
     
-    public Set<String> getHashtags() { return hashtags; }
-    public void setHashtags(Set<String> hashtags) { this.hashtags = hashtags; }
-    
-    public Set<String> getMentions() { return mentions; }
-    public void setMentions(Set<String> mentions) { this.mentions = mentions; }
-    
-    public Set<String> getTopicTags() { return topicTags; }
-    public void setTopicTags(Set<String> topicTags) { this.topicTags = topicTags; }
+    public String getVideoId() { return videoId; }
+    public void setVideoId(String videoId) { this.videoId = videoId; }
     
     public SentimentData getSentimentData() { return sentimentData; }
     public void setSentimentData(SentimentData sentimentData) { this.sentimentData = sentimentData; }
     
-    // Legacy compatibility methods
-    @Deprecated
-    public String getPostId() { return externalId; }
-    @Deprecated
-    public void setPostId(String postId) { this.externalId = postId; }
-    
-    @Deprecated
-    public Integer getScore() { return upvotes; }
-    @Deprecated
-    public void setScore(Integer score) { this.upvotes = score; }
-    
-    @Deprecated
-    public Integer getCommentCount() { return commentsCount; }
-    @Deprecated
-    public void setCommentCount(Integer commentCount) { this.commentsCount = commentCount; }
-    
-    @Deprecated
-    public LocalDateTime getIngestionTime() { return ingestedAt; }
-    @Deprecated
-    public void setIngestionTime(LocalDateTime ingestionTime) { this.ingestedAt = ingestionTime; }
-    
+    // Simple equality based on business key
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -331,11 +183,8 @@ public class SocialPost {
                 "id=" + id +
                 ", platform=" + platform +
                 ", externalId='" + externalId + '\'' +
-                ", title='" + title + '\'' +
                 ", author='" + author + '\'' +
-                ", subreddit='" + subreddit + '\'' +
                 ", engagementScore=" + engagementScore +
-                ", createdAt=" + createdAt +
                 '}';
     }
 }
