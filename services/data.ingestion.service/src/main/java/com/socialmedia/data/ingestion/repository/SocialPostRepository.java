@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+// Suggested organization improvements for SocialPostRepository.java
+
 /**
  * Simplified repository for SocialPost entities - MVP version
  * Removed: complex analytics, cross-platform comparisons, batch operations
@@ -33,6 +35,30 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
      */
     Optional<SocialPost> findByExternalIdAndPlatform(String externalId, Platform platform);
     
+    /**
+     * Find post by content hash and platform (content duplicate detection)
+     */
+    Optional<SocialPost> findByContentHashAndPlatform(String contentHash, Platform platform);
+    
+    /**
+     * Find similar posts by content hash (potential duplicates)
+     */
+    @Query("SELECT s FROM SocialPost s WHERE s.contentHash = :hash AND s.id != :excludeId")
+    List<SocialPost> findSimilarPosts(@Param("hash") String contentHash, @Param("excludeId") Long excludeId);
+    
+    // ===== PLATFORM & TIME-BASED QUERIES =====
+
+    
+    /**
+     * Check if post exists by external ID and platform (duplicate detection)
+     */
+    boolean existsByExternalIdAndPlatform(String externalId, Platform platform);
+    
+    /**
+     * Find post by external ID and platform
+     */
+    Optional<SocialPost> findByExternalIdAndPlatform(String externalId, Platform platform);
+    
     // ===== PLATFORM & TIME-BASED QUERIES =====
     
     /**
@@ -41,23 +67,44 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     Page<SocialPost> findByPlatform(Platform platform, Pageable pageable);
     
     /**
+     * Find posts by multiple platforms with pagination
+     */
+    Page<SocialPost> findByPlatformIn(List<Platform> platforms, Pageable pageable);
+    
+    /**
      * Find posts by platform and created after a specific date
      */
     List<SocialPost> findByPlatformAndCreatedAtAfter(Platform platform, LocalDateTime date);
     
     /**
-     * Find posts by platform and created between dates
+     * Find posts by platform and created between dates (no pagination)
      */
     List<SocialPost> findByPlatformAndCreatedAtBetween(Platform platform, 
                                                       LocalDateTime startDate, 
                                                       LocalDateTime endDate);
     
     /**
-     * Find posts created between dates
+     * Find posts by platform and created between dates with pagination
      */
-    List<SocialPost> findByCreatedAtBetween(LocalDateTime startDate, LocalDateTime endDate);
+    Page<SocialPost> findByPlatformInAndCreatedAtBetween(List<Platform> platforms, 
+                                                        LocalDateTime startDate, 
+                                                        LocalDateTime endDate, 
+                                                        Pageable pageable);
     
-    // ===== BASIC ANALYTICS =====
+    /**
+     * Find posts created between dates (no pagination)
+     */
+    @Query("SELECT s FROM SocialPost s WHERE s.createdAt BETWEEN :start AND :end ORDER BY s.createdAt DESC")
+    List<SocialPost> findByCreatedAtBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+    
+    /**
+     * Find posts created between dates with pagination
+     */
+    Page<SocialPost> findByCreatedAtBetween(LocalDateTime startDate, 
+                                          LocalDateTime endDate, 
+                                          Pageable pageable);
+    
+    // ===== COUNT & AGGREGATION QUERIES =====
     
     /**
      * Count posts by platform since a specific date
@@ -66,17 +113,25 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     Long countByPlatformSince(@Param("platform") Platform platform, @Param("since") LocalDateTime since);
     
     /**
-     * Find high engagement posts above a threshold
+     * Count posts created between dates
      */
-    @Query("SELECT s FROM SocialPost s WHERE s.engagementScore > :minScore ORDER BY s.engagementScore DESC")
-    List<SocialPost> findHighEngagementPosts(@Param("minScore") Double minScore, Pageable pageable);
+    Long countByCreatedAtBetween(LocalDateTime startDate, LocalDateTime endDate);
     
     /**
-     * Find posts by author across platforms
+     * Count distinct authors between dates
      */
-    List<SocialPost> findByAuthor(String author);
+    @Query("SELECT COUNT(DISTINCT s.author) FROM SocialPost s WHERE s.createdAt BETWEEN :start AND :end")
+    Long countDistinctAuthorsByCreatedAtBetween(@Param("start") LocalDateTime startDate, 
+                                               @Param("end") LocalDateTime endDate);
     
-    // ===== CONTENT SEARCH =====
+    /**
+     * Average engagement score between dates
+     */
+    @Query("SELECT AVG(s.engagementScore) FROM SocialPost s WHERE s.createdAt BETWEEN :start AND :end")
+    Double averageEngagementScoreByCreatedAtBetween(@Param("start") LocalDateTime startDate, 
+                                                    @Param("end") LocalDateTime endDate);
+    
+    // ===== CONTENT SEARCH & FILTERING =====
     
     /**
      * Find posts containing keywords in content or title
@@ -90,25 +145,25 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
                                                         @Param("platform") Platform platform, 
                                                         Pageable pageable);
     
-    // ===== REDDIT-SPECIFIC QUERIES =====
+    /**
+     * Find posts by author across platforms
+     */
+    @Query("SELECT s FROM SocialPost s WHERE s.author = :author ORDER BY s.createdAt DESC")
+    List<SocialPost> findByAuthor(@Param("author") String author);
+    
+    /**
+     * Find posts with specific hashtags
+     */
+    @Query("SELECT DISTINCT s FROM SocialPost s JOIN s.hashtags h WHERE h = :hashtag ORDER BY s.createdAt DESC")
+    List<SocialPost> findByHashtag(@Param("hashtag") String hashtag);
+    
+    // ===== ENGAGEMENT & TRENDING ANALYSIS =====
+
     
     /**
      * Find posts by subreddit
      */
     List<SocialPost> findBySubreddit(String subreddit, Pageable pageable);
-    
-    /**
-     * Get top authors by engagement for a platform
-     */
-    @Query("SELECT s.author, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
-           "FROM SocialPost s " +
-           "WHERE s.platform = :platform " +
-           "GROUP BY s.author " +
-           "HAVING COUNT(s) > :minPosts " +
-           "ORDER BY avgEngagement DESC")
-    List<Object[]> getTopAuthorsByEngagement(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
-    
-    // ===== SIMPLE TRENDING ANALYSIS =====
     
     /**
      * Find trending posts (high engagement in recent time)
@@ -121,10 +176,24 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
                                       @Param("minEngagement") Double minEngagement, 
                                       Pageable pageable);
     
-    // ===== MINIMAL ANALYTICS FOR REPORTS =====
+    /**
+     * Get average engagement score by platform
+     */
+    @Query("SELECT s.author, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
+           "FROM SocialPost s " +
+           "WHERE s.platform = :platform " +
+           "GROUP BY s.author " +
+           "HAVING COUNT(s) > :minPosts " +
+           "ORDER BY avgEngagement DESC")
+    List<Object[]> getTopAuthorsByEngagement(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
+    
+    // ===== SIMPLE TRENDING ANALYSIS =====
+    
+    // ===== AUTHOR ANALYTICS =====
     
     /**
-     * Get basic platform comparison data
+     * Get top authors by engagement for a platform
+
      */
     @Query("SELECT s.platform, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
            "FROM SocialPost s " +
@@ -154,7 +223,39 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     List<Object[]> getSubredditStats();
     
     /**
-     * Get engagement trends over time (simplified)
+     * Reddit-specific: Find posts with high upvote ratio
+     */
+    @Query("SELECT s FROM SocialPost s WHERE " +
+           "s.platform = 'REDDIT' AND " +
+           "s.upvotes > 0 AND s.downvotes IS NOT NULL AND " +
+           "(s.upvotes * 1.0 / (s.upvotes + s.downvotes)) > :ratio " +
+           "ORDER BY s.upvotes DESC")
+    List<SocialPost> findHighUpvoteRatioPosts(@Param("ratio") Double ratio, Pageable pageable);
+    
+    // ===== TIME-SERIES & TREND ANALYTICS =====
+    
+    /**
+     * Get daily post counts for analytics dashboard
+     */
+    @Query("SELECT DATE(s.createdAt) as date, COUNT(s) as count " +
+           "FROM SocialPost s " +
+           "WHERE s.createdAt BETWEEN :start AND :end " +
+           "GROUP BY DATE(s.createdAt) " +
+           "ORDER BY date")
+    List<Object[]> getDailyPostCounts(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+    
+    /**
+     * Get hourly post distribution for trend analysis
+     */
+    @Query("SELECT HOUR(s.createdAt) as hour, COUNT(s) as count " +
+           "FROM SocialPost s " +
+           "WHERE s.platform = :platform AND s.createdAt > :since " +
+           "GROUP BY HOUR(s.createdAt) " +
+           "ORDER BY hour")
+    List<Object[]> getHourlyDistribution(@Param("platform") Platform platform, @Param("since") LocalDateTime since);
+    
+    /**
+     * Get engagement trends over time
      */
     @Query("SELECT DATE(s.createdAt) as date, " +
            "AVG(s.engagementScore) as avgEngagement, " +
@@ -167,9 +268,64 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
                                       @Param("start") LocalDateTime start, 
                                       @Param("end") LocalDateTime end);
     
+    // ===== CROSS-PLATFORM ANALYTICS =====
+    
+    /**
+     * Get platform comparison data
+     */
+    @Query("SELECT s.platform, " +
+           "COUNT(s) as postCount, " +
+           "AVG(s.engagementScore) as avgEngagement, " +
+           "SUM(CASE WHEN s.engagementScore > 100 THEN 1 ELSE 0 END) as highEngagementCount " +
+           "FROM SocialPost s " +
+           "WHERE s.createdAt > :since " +
+           "GROUP BY s.platform")
+    List<Object[]> getPlatformComparisonData(@Param("since") LocalDateTime since);
+    
+    /**
+     * Get posting volume statistics
+     */
+    @Query("SELECT " +
+           "COUNT(s) as totalPosts, " +
+           "COUNT(DISTINCT s.author) as uniqueAuthors, " +
+           "COUNT(DISTINCT s.platform) as platformsUsed, " +
+           "AVG(s.engagementScore) as avgEngagement " +
+           "FROM SocialPost s " +
+           "WHERE s.createdAt > :since")
+    Object[] getVolumeStatistics(@Param("since") LocalDateTime since);
+    
+    // ===== SENTIMENT ANALYSIS SUPPORT =====
+    
     /**
      * Find posts that need sentiment analysis
      */
     @Query("SELECT s FROM SocialPost s WHERE s.sentimentData IS NULL AND s.content IS NOT NULL ORDER BY s.createdAt DESC")
     List<SocialPost> findPostsNeedingSentimentAnalysis(Pageable pageable);
+    
+    // ===== BATCH OPERATIONS & UPDATES =====
+    
+    /**
+     * Update engagement score for a specific post
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE SocialPost s SET s.engagementScore = :score WHERE s.id = :id")
+    int updateEngagementScore(@Param("id") Long id, @Param("score") Double score);
+    
+    /**
+     * Mark posts as processed
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE SocialPost s SET s.processedAt = CURRENT_TIMESTAMP WHERE s.id IN :ids")
+    int markAsProcessed(@Param("ids") List<Long> ids);
+    
+    /**
+     * Bulk update processed timestamp for posts without sentiment analysis
+     */
+    @Modifying
+    @Transactional
+    @Query("UPDATE SocialPost s SET s.processedAt = CURRENT_TIMESTAMP " +
+           "WHERE s.processedAt IS NULL AND s.sentimentData IS NULL")
+    int markUnprocessedForSentimentAnalysis();
 }

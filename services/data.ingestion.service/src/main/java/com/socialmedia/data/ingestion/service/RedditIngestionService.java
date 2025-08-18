@@ -71,7 +71,41 @@ public class RedditIngestionService {
     }
     
     /**
-     * Ingest from multiple subreddits
+     * 🔄 DATA CONVERSION: RedditPost → SocialPost
+     */
+    private SocialPost convertToSocialPost(RedditPost redditPost) {
+        // Create using new constructor and Platform enum
+        SocialPost socialPost = new SocialPost(
+            Platform.REDDIT,
+            redditPost.getId(),
+            redditPost.getContent(),
+            redditPost.getAuthor()
+        );
+        
+        // Set additional fields
+        socialPost.setTitle(redditPost.getTitle());
+        socialPost.setUrl(redditPost.getUrl());
+        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore().longValue() : 0L);
+        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments().longValue() : 0L);
+        socialPost.setSubreddit(redditPost.getSubreddit());
+                
+        // Convert Reddit timestamp (Unix epoch) to LocalDateTime
+        if (redditPost.getCreatedUtc() != null) {
+            LocalDateTime createdAt = LocalDateTime.ofInstant(
+                Instant.ofEpochSecond(redditPost.getCreatedUtc().longValue()),
+                ZoneId.systemDefault()
+            );
+            socialPost.setCreatedAt(createdAt);
+        }
+        
+        // Calculate engagement score using new method
+        socialPost.calculateEngagementScore();
+        
+        return socialPost;
+    }
+    
+    /**
+     * 🎯 BATCH PROCESSING: Multiple subreddits
      */
     public Mono<Integer> ingestFromMultipleSubreddits(List<String> subreddits, int limitPerSubreddit) {
         logger.info("Starting batch ingestion from {} subreddits", subreddits.size());
