@@ -75,7 +75,7 @@ public class EngagementStats {
     
     public Double getStandardDeviation() { return standardDeviation; }
     public void setStandardDeviation(Double standardDeviation) { this.standardDeviation = standardDeviation; }
-    
+  
     public Long getTotalLikes() { return totalLikes; }
     public void setTotalLikes(Long totalLikes) { this.totalLikes = totalLikes; }
     
@@ -90,7 +90,7 @@ public class EngagementStats {
     
     public Double getAverageUpvotes() { return averageUpvotes; }
     public void setAverageUpvotes(Double averageUpvotes) { this.averageUpvotes = averageUpvotes; }
-    
+
     public Long getTotalComments() { return totalComments; }
     public void setTotalComments(Long totalComments) { this.totalComments = totalComments; }
     

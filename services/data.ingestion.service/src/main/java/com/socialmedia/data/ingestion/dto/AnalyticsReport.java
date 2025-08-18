@@ -1,4 +1,4 @@
-// dto/AnalyticsReport.java - Analytics response DTO
+
 package com.socialmedia.data.ingestion.dto;
 
 import com.socialmedia.data.ingestion.model.Platform;
@@ -8,6 +8,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Analytics report
+ */
 public class AnalyticsReport {
     
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -32,6 +35,7 @@ public class AnalyticsReport {
     private Map<SentimentLabel, Long> sentimentDistribution;
     private Double overallSentimentScore;
     private Map<Platform, Double> sentimentByPlatform;
+
     
     // Engagement statistics
     private EngagementStats engagementStats;
@@ -41,6 +45,9 @@ public class AnalyticsReport {
     private List<TopContent> topPosts;
     private List<String> topHashtags;
     private List<String> topTopics;
+    // Top performers (simplified)
+    private List<TopAuthor> topAuthors;
+    private List<TopPost> topPosts;
     
     // Reddit-specific metrics
     private List<SubredditStats> topSubreddits;
@@ -88,26 +95,33 @@ public class AnalyticsReport {
         public void setPrimaryPlatform(Platform primaryPlatform) { this.primaryPlatform = primaryPlatform; }
     }
     
-    public static class TopContent {
+
+    public static class TopPost {
         private Long id;
+        private String title;
         private String content;
         private String author;
         private Platform platform;
         private Double engagementScore;
-        private SentimentLabel sentiment;
         
-        public TopContent(Long id, String content, String author, Platform platform, Double engagementScore, SentimentLabel sentiment) {
+        public TopPost(Long id, String title, String content, String author, Platform platform, Double engagementScore) {
             this.id = id;
-            this.content = content.length() > 200 ? content.substring(0, 200) + "..." : content;
+            this.title = title;
+            // Truncate content for display
+            this.content = content != null && content.length() > 150 ? 
+                content.substring(0, 150) + "..." : content;
             this.author = author;
             this.platform = platform;
             this.engagementScore = engagementScore;
-            this.sentiment = sentiment;
         }
         
         // Getters and Setters
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
+        
+
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
         
         public String getContent() { return content; }
         public void setContent(String content) { this.content = content; }
@@ -172,6 +186,7 @@ public class AnalyticsReport {
         
         public Long getCount() { return count; }
         public void setCount(Long count) { this.count = count; }
+
     }
     
     // Getters and Setters for main class
@@ -207,7 +222,7 @@ public class AnalyticsReport {
     
     public Map<Platform, Double> getSentimentByPlatform() { return sentimentByPlatform; }
     public void setSentimentByPlatform(Map<Platform, Double> sentimentByPlatform) { this.sentimentByPlatform = sentimentByPlatform; }
-    
+
     public EngagementStats getEngagementStats() { return engagementStats; }
     public void setEngagementStats(EngagementStats engagementStats) { this.engagementStats = engagementStats; }
     
@@ -231,4 +246,9 @@ public class AnalyticsReport {
     
     public List<TrendPoint> getVolumeTrend() { return volumeTrend; }
     public void setVolumeTrend(List<TrendPoint> volumeTrend) { this.volumeTrend = volumeTrend; }
+    public List<TopPost> getTopPosts() { return topPosts; }
+    public void setTopPosts(List<TopPost> topPosts) { this.topPosts = topPosts; }
+    
+    public List<SubredditStats> getTopSubreddits() { return topSubreddits; }
+    public void setTopSubreddits(List<SubredditStats> topSubreddits) { this.topSubreddits = topSubreddits; }
 }

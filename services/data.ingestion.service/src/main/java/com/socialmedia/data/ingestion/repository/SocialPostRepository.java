@@ -5,11 +5,9 @@ import com.socialmedia.data.ingestion.model.SocialPost;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -18,8 +16,9 @@ import java.util.Optional;
 // Suggested organization improvements for SocialPostRepository.java
 
 /**
- * Enhanced repository for SocialPost entities with advanced querying capabilities
- * for analytics, engagement metrics, and cross-platform analysis.
+ * Simplified repository for SocialPost entities - MVP version
+ * Removed: complex analytics, cross-platform comparisons, batch operations
+ * Kept: essential CRUD, basic search, simple analytics
  */
 @Repository
 public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
@@ -48,11 +47,19 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     List<SocialPost> findSimilarPosts(@Param("hash") String contentHash, @Param("excludeId") Long excludeId);
     
     // ===== PLATFORM & TIME-BASED QUERIES =====
+
     
     /**
-     * Find posts by platform ordered by creation date (newest first)
+     * Check if post exists by external ID and platform (duplicate detection)
      */
-    List<SocialPost> findByPlatformOrderByCreatedAtDesc(Platform platform);
+    boolean existsByExternalIdAndPlatform(String externalId, Platform platform);
+    
+    /**
+     * Find post by external ID and platform
+     */
+    Optional<SocialPost> findByExternalIdAndPlatform(String externalId, Platform platform);
+    
+    // ===== PLATFORM & TIME-BASED QUERIES =====
     
     /**
      * Find posts by platform with pagination
@@ -127,7 +134,7 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     // ===== CONTENT SEARCH & FILTERING =====
     
     /**
-     * Find posts containing specific keywords
+     * Find posts containing keywords in content or title
      */
     @Query("SELECT s FROM SocialPost s WHERE " +
            "(LOWER(s.content) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
@@ -151,12 +158,12 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     List<SocialPost> findByHashtag(@Param("hashtag") String hashtag);
     
     // ===== ENGAGEMENT & TRENDING ANALYSIS =====
+
     
     /**
-     * Find high engagement posts above a threshold
+     * Find posts by subreddit
      */
-    @Query("SELECT s FROM SocialPost s WHERE s.engagementScore > :minScore ORDER BY s.engagementScore DESC")
-    List<SocialPost> findHighEngagementPosts(@Param("minScore") Double minScore, Pageable pageable);
+    List<SocialPost> findBySubreddit(String subreddit, Pageable pageable);
     
     /**
      * Find trending posts (high engagement in recent time)
@@ -172,25 +179,6 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     /**
      * Get average engagement score by platform
      */
-    @Query("SELECT AVG(s.engagementScore) FROM SocialPost s WHERE s.platform = :platform")
-    Double getAverageEngagementByPlatform(@Param("platform") Platform platform);
-    
-    /**
-     * Get engagement statistics for a platform
-     */
-    @Query("SELECT " +
-           "AVG(s.engagementScore) as avgEngagement, " +
-           "MAX(s.engagementScore) as maxEngagement, " +
-           "MIN(s.engagementScore) as minEngagement, " +
-           "COUNT(s) as totalPosts " +
-           "FROM SocialPost s WHERE s.platform = :platform")
-    Object[] getEngagementStats(@Param("platform") Platform platform);
-    
-    // ===== AUTHOR ANALYTICS =====
-    
-    /**
-     * Get top authors by engagement for a platform
-     */
     @Query("SELECT s.author, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
            "FROM SocialPost s " +
            "WHERE s.platform = :platform " +
@@ -199,26 +187,33 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
            "ORDER BY avgEngagement DESC")
     List<Object[]> getTopAuthorsByEngagement(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
     
+    // ===== SIMPLE TRENDING ANALYSIS =====
+    
+    // ===== AUTHOR ANALYTICS =====
+    
     /**
-     * Get author posting frequency
+     * Get top authors by engagement for a platform
+
      */
-    @Query("SELECT s.author, COUNT(s) as postCount " +
+    @Query("SELECT s.platform, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
            "FROM SocialPost s " +
-           "WHERE s.platform = :platform AND s.createdAt > :since " +
-           "GROUP BY s.author " +
-           "ORDER BY postCount DESC")
-    List<Object[]> getAuthorPostingFrequency(@Param("platform") Platform platform, @Param("since") LocalDateTime since);
-    
-    // ===== PLATFORM-SPECIFIC QUERIES =====
+           "WHERE s.createdAt > :since " +
+           "GROUP BY s.platform")
+    List<Object[]> getPlatformComparisonData(@Param("since") LocalDateTime since);
     
     /**
-     * Reddit-specific: Find posts by subreddit
+     * Get basic volume statistics
      */
-    @Query("SELECT s FROM SocialPost s WHERE s.subreddit = :subreddit ORDER BY s.engagementScore DESC")
-    List<SocialPost> findBySubreddit(@Param("subreddit") String subreddit, Pageable pageable);
+    @Query("SELECT " +
+           "COUNT(s) as totalPosts, " +
+           "COUNT(DISTINCT s.author) as uniqueAuthors, " +
+           "AVG(s.engagementScore) as avgEngagement " +
+           "FROM SocialPost s " +
+           "WHERE s.createdAt > :since")
+    Object[] getVolumeStatistics(@Param("since") LocalDateTime since);
     
     /**
-     * Reddit-specific: Get subreddit statistics
+     * Get subreddit statistics (Reddit only)
      */
     @Query("SELECT s.subreddit, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
            "FROM SocialPost s " +

@@ -1,8 +1,8 @@
-// service/DataProcessingService.java - Business logic layer with validation, duplicate detection, analytics
 package com.socialmedia.data.ingestion.service;
 
 import com.socialmedia.data.ingestion.dto.*;
 import com.socialmedia.data.ingestion.model.*;
+
 import com.socialmedia.data.ingestion.repository.SocialPostRepository;
 import com.socialmedia.data.ingestion.repository.SentimentDataRepository;
 import jakarta.validation.ConstraintViolation;
@@ -89,6 +89,7 @@ public class DataProcessingService {
                 savedPosts.add(saved);
             } catch (Exception e) {
                 errors.add("Failed to save post " + postDto.getExternalId() + ": " + e.getMessage());
+
                 logger.error("Error saving post {}: {}", postDto.getExternalId(), e.getMessage());
             }
         }
@@ -223,6 +224,7 @@ public class DataProcessingService {
         
         if (existingPost.isEmpty()) {
             logger.warn("Post not found for update: {} on platform: {}", externalId, platform);
+
             throw new PostNotFoundException("Post not found: " + externalId);
         }
         
@@ -234,6 +236,7 @@ public class DataProcessingService {
         if (updates.getCommentCount() != null) post.setCommentCount(updates.getCommentCount());
         if (updates.getUpvotes() != null) post.setUpvotes(updates.getUpvotes());
         if (updates.getDownvotes() != null) post.setDownvotes(updates.getDownvotes());
+
         if (updates.getViewCount() != null) post.setViewCount(updates.getViewCount());
         
         // Recalculate engagement score
@@ -243,7 +246,7 @@ public class DataProcessingService {
         logger.info("Successfully updated engagement metrics for post: {}", externalId);
     }
     
-    // Private helper methods
+    // ===== PRIVATE HELPER METHODS =====
     
     private void validateSocialPostDto(SocialPostDto postDto) {
         Set<ConstraintViolation<SocialPostDto>> violations = validator.validate(postDto);
@@ -363,6 +366,7 @@ public class DataProcessingService {
         double score = (likes * 0.4) + (shares * 0.4) + (comments * 0.2);
         
         return Math.max(0, Math.min(100, score / 10)); // Normalize to 0-100 scale
+
     }
     
     private double calculateYouTubeEngagementScore(SocialPost post) {
@@ -455,6 +459,7 @@ public class DataProcessingService {
         
         entity.setExternalId(dto.getExternalId());
         entity.setPlatform(dto.getPlatform());
+        entity.setTitle(dto.getTitle());
         entity.setContent(dto.getContent());
         entity.setAuthor(dto.getAuthor());
         entity.setCreatedAt(dto.getCreatedAt());
@@ -491,6 +496,7 @@ public class DataProcessingService {
                 .id(entity.getId())
                 .externalId(entity.getExternalId())
                 .platform(entity.getPlatform())
+                .title(entity.getTitle()) // Add this line
                 .content(entity.getContent())
                 .author(entity.getAuthor())
                 .createdAt(entity.getCreatedAt())

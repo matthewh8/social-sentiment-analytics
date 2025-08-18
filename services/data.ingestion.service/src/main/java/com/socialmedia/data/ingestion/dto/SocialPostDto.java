@@ -18,12 +18,16 @@ public class SocialPostDto {
     @NotNull(message = "Platform is required")
     private Platform platform;
     
+    @Size(max = 500, message = "Title must not exceed 500 characters")
+    private String title; // Reddit/YouTube titles (null for Twitter)
+    
     @NotBlank(message = "Content is required")
     @Size(max = 10000, message = "Content must not exceed 10000 characters")
     private String content;
     
     @NotBlank(message = "Author is required")
     @Size(max = 255, message = "Author must not exceed 255 characters")
+
     private String author;
     
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")

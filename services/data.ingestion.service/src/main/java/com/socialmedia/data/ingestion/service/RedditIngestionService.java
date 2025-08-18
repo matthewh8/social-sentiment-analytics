@@ -13,18 +13,21 @@ import reactor.core.publisher.Mono;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+/**
+ * Simplified Reddit ingestion service for MVP
+ * Removed: complex session tracking, advanced statistics, batch processing optimizations
+ * Kept: core ingestion, basic conversion, simple duplicate filtering
+ */
 @Service
 public class RedditIngestionService {
     
     private static final Logger logger = LoggerFactory.getLogger(RedditIngestionService.class);
     
-    // Session counter for tracking ingested posts
-    private final AtomicInteger sessionIngestedCount = new AtomicInteger(0);
+    private final AtomicInteger sessionCounter = new AtomicInteger(0);
     
     @Autowired
     private RedditApiClient redditApiClient;
@@ -33,7 +36,7 @@ public class RedditIngestionService {
     private SocialPostRepository socialPostRepository;
     
     /**
-     * 🎯 MAIN METHOD: Ingest posts from a single subreddit
+     * Ingest posts from a single subreddit
      */
     public Mono<Integer> ingestFromSubreddit(String subreddit, int limit) {
         logger.info("Starting ingestion from r/{} with limit {}", subreddit, limit);
@@ -43,24 +46,23 @@ public class RedditIngestionService {
             .flatMap(redditPosts -> {
                 logger.info("Fetched {} posts from r/{}", redditPosts.size(), subreddit);
                 
-                // Convert to SocialPost objects
+                // Convert to SocialPost entities
                 List<SocialPost> socialPosts = redditPosts.stream()
                     .map(this::convertToSocialPost)
                     .collect(Collectors.toList());
                 
-                // Filter out duplicates using new method signature
+                // Simple duplicate filtering
                 List<SocialPost> newPosts = socialPosts.stream()
-                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(post.getExternalId(), post.getPlatform()))
+                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(
+                        post.getExternalId(), post.getPlatform()))
                     .collect(Collectors.toList());
                 
                 logger.info("Saving {} new posts (filtered {} duplicates)", 
                     newPosts.size(), socialPosts.size() - newPosts.size());
                 
-                // Save to database
+                // Save all new posts
                 List<SocialPost> savedPosts = socialPostRepository.saveAll(newPosts);
-                
-                // Update session counter
-                sessionIngestedCount.addAndGet(savedPosts.size());
+                sessionCounter.addAndGet(savedPosts.size());
                 
                 logger.info("Successfully saved {} posts from r/{}", savedPosts.size(), subreddit);
                 return Mono.just(savedPosts.size());
@@ -118,16 +120,17 @@ public class RedditIngestionService {
                     .map(this::convertToSocialPost)
                     .collect(Collectors.toList());
                 
-                // Filter duplicates using new method signature
+                // Filter duplicates
                 List<SocialPost> newPosts = socialPosts.stream()
-                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(post.getExternalId(), post.getPlatform()))
+                    .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(
+                        post.getExternalId(), post.getPlatform()))
                     .collect(Collectors.toList());
                 
                 logger.info("Saving {} new posts from batch ingestion", newPosts.size());
                 
                 // Save all
                 List<SocialPost> savedPosts = socialPostRepository.saveAll(newPosts);
-                sessionIngestedCount.addAndGet(savedPosts.size());
+                sessionCounter.addAndGet(savedPosts.size());
                 
                 return Mono.just(savedPosts.size());
             })
@@ -135,54 +138,79 @@ public class RedditIngestionService {
     }
     
     /**
-     * 🧪 TESTING METHOD: Manual ingestion trigger
+     * Simple test ingestion
      */
     public Mono<Integer> testIngestion() {
         logger.info("Running test ingestion from r/programming");
         return ingestFromSubreddit("programming", 5);
     }
     
-    // ===== ADDITIONAL METHODS FOR CONTROLLER SUPPORT =====
-    
     /**
-     * Manual ingestion trigger (used by REST controller)
-     */
-    public Mono<Integer> triggerManualIngestion(String[] subreddits, int postsPerSubreddit) {
-        List<String> subredditList = Arrays.asList(subreddits);
-        return ingestFromMultipleSubreddits(subredditList, postsPerSubreddit);
-    }
-    
-    /**
-     * Ingest trending posts from r/popular
-     */
-    public Mono<Integer> ingestTrendingPosts(int limit) {
-        logger.info("Ingesting trending posts from r/popular, limit: {}", limit);
-        return ingestFromSubreddit("popular", limit);
-    }
-    
-    /**
-     * Get ingestion statistics
+     * Get basic ingestion statistics
      */
     public IngestionStats getIngestionStats() {
         Long totalPosts = socialPostRepository.count();
-        
-        // Use new method to count Reddit posts
         Long redditPosts = socialPostRepository.countByPlatformSince(
             Platform.REDDIT, 
-            LocalDateTime.now().minusYears(10) // Get all Reddit posts
+            LocalDateTime.now().minusYears(1) // Get all Reddit posts from last year
         );
-        
-        // Get recent posts (last 24 hours)
         Long recentPosts = socialPostRepository.countByPlatformSince(
             Platform.REDDIT, 
             LocalDateTime.now().minusHours(24)
         );
         
-        return new IngestionStats(totalPosts, redditPosts, recentPosts, sessionIngestedCount.get());
+        return new IngestionStats(totalPosts, redditPosts, recentPosts, sessionCounter.get());
+    }
+    
+    // ===== PRIVATE HELPER METHODS =====
+    
+    /**
+     * Convert RedditPost to SocialPost entity (simplified)
+     */
+    private SocialPost convertToSocialPost(RedditPost redditPost) {
+        SocialPost socialPost = new SocialPost();
+        
+        // Basic fields
+        socialPost.setPlatform(Platform.REDDIT);
+        socialPost.setExternalId(redditPost.getId());
+        socialPost.setTitle(redditPost.getTitle());
+        socialPost.setContent(redditPost.getContent());
+        socialPost.setAuthor(redditPost.getAuthor());
+        socialPost.setSubreddit(redditPost.getSubreddit());
+        
+        // Engagement metrics
+        socialPost.setUpvotes(redditPost.getScore() != null ? redditPost.getScore().longValue() : 0L);
+        socialPost.setCommentCount(redditPost.getNumComments() != null ? redditPost.getNumComments().longValue() : 0L);
+        
+        // Convert timestamp
+        if (redditPost.getCreatedUtc() != null) {
+            LocalDateTime createdAt = LocalDateTime.ofInstant(
+                Instant.ofEpochSecond(redditPost.getCreatedUtc()),
+                ZoneId.systemDefault()
+            );
+            socialPost.setCreatedAt(createdAt);
+        }
+        
+        // Calculate simple engagement score
+        socialPost.setEngagementScore(calculateSimpleEngagement(socialPost));
+        
+        return socialPost;
     }
     
     /**
-     * Statistics data class
+     * Simple engagement score calculation
+     */
+    private double calculateSimpleEngagement(SocialPost post) {
+        long upvotes = post.getUpvotes() != null ? post.getUpvotes() : 0;
+        long comments = post.getCommentCount() != null ? post.getCommentCount() : 0;
+        
+        // Simple formula: upvotes + (comments * 2), normalized to 0-100
+        double score = upvotes + (comments * 2);
+        return Math.max(0, Math.min(100, score / 10));
+    }
+    
+    /**
+     * Simple statistics data class
      */
     public static class IngestionStats {
         private final Long totalPosts;
@@ -197,7 +225,6 @@ public class RedditIngestionService {
             this.sessionTotal = sessionTotal;
         }
         
-        // Getters
         public Long getTotalPosts() { return totalPosts; }
         public Long getRedditPosts() { return redditPosts; }
         public Long getRecentPosts() { return recentPosts; }
