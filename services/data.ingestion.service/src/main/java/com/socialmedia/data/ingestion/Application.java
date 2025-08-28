@@ -4,13 +4,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import com.socialmedia.data.ingestion.config.RedditApiConfig;
+import com.socialmedia.data.ingestion.config.YouTubeApiConfig;
 
 @SpringBootApplication
-@EnableConfigurationProperties(RedditApiConfig.class)
+@EnableConfigurationProperties({RedditApiConfig.class, YouTubeApiConfig.class})
 public class Application {
-
-	public static void main(String[] args) {
-		SpringApplication.run(Application.class, args);
-	}
-
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
 }

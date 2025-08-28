@@ -1,4 +1,3 @@
-// src/main/java/com/socialmedia/data/ingestion/config/WebClientConfig.java
 package com.socialmedia.data.ingestion.config;
 
 import io.netty.channel.ChannelOption;
@@ -25,10 +24,13 @@ import org.slf4j.LoggerFactory;
 public class WebClientConfig {
     
     private static final Logger logger = LoggerFactory.getLogger(WebClientConfig.class);
-    private final RedditApiConfig redditConfig;
     
-    public WebClientConfig(RedditApiConfig redditConfig) {
+    private final RedditApiConfig redditConfig;
+    private final YouTubeApiConfig youtubeConfig;
+    
+    public WebClientConfig(RedditApiConfig redditConfig, YouTubeApiConfig youtubeConfig) {
         this.redditConfig = redditConfig;
+        this.youtubeConfig = youtubeConfig;
     }
     
     @Bean
@@ -57,7 +59,33 @@ public class WebClientConfig {
             .build();
     }
     
-    // Request logging filter
+    @Bean
+    public WebClient youtubeWebClient() {
+        // Configure HTTP client with timeouts and connection pooling
+        HttpClient httpClient = HttpClient.create()
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, youtubeConfig.getConnectionTimeoutMs())
+            .doOnConnected(conn -> 
+                conn.addHandlerLast(new ReadTimeoutHandler(youtubeConfig.getReadTimeoutMs(), TimeUnit.MILLISECONDS))
+                    .addHandlerLast(new WriteTimeoutHandler(youtubeConfig.getReadTimeoutMs(), TimeUnit.MILLISECONDS)))
+            .compress(true); // Enable compression
+        
+        // Increase buffer size for large YouTube responses
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024)) // 1MB
+            .build();
+        
+        return WebClient.builder()
+            .baseUrl(youtubeConfig.getBaseUrl())
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
+            .exchangeStrategies(strategies)
+            .defaultHeader("User-Agent", youtubeConfig.getUserAgent())
+            .filter(logYouTubeRequest())
+            .filter(logYouTubeResponse())
+            .filter(youtubeErrorHandler())
+            .build();
+    }
+    
+    // Reddit filters (existing)
     private ExchangeFilterFunction logRequest() {
         return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
             logger.debug("Reddit API Request: {} {}", 
@@ -66,7 +94,6 @@ public class WebClientConfig {
         });
     }
     
-    // Response logging filter
     private ExchangeFilterFunction logResponse() {
         return ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
             logger.debug("Reddit API Response: {} for {}", 
@@ -75,7 +102,6 @@ public class WebClientConfig {
         });
     }
     
-    // Centralized error handling
     private ExchangeFilterFunction errorHandler() {
         return ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
             if (clientResponse.statusCode().is4xxClientError() || 
@@ -91,6 +117,39 @@ public class WebClientConfig {
         });
     }
     
+    // YouTube filters (new)
+    private ExchangeFilterFunction logYouTubeRequest() {
+        return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
+            logger.debug("YouTube API Request: {} {}", 
+                clientRequest.method(), clientRequest.url());
+            return Mono.just(clientRequest);
+        });
+    }
+    
+    private ExchangeFilterFunction logYouTubeResponse() {
+        return ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
+            logger.debug("YouTube API Response: {} for {}", 
+                clientResponse.statusCode(), clientResponse.request().getURI());
+            return Mono.just(clientResponse);
+        });
+    }
+    
+    private ExchangeFilterFunction youtubeErrorHandler() {
+        return ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
+            if (clientResponse.statusCode().is4xxClientError() || 
+                clientResponse.statusCode().is5xxServerError()) {
+                
+                logger.warn("YouTube API error response: {} for {}", 
+                    clientResponse.statusCode(), clientResponse.request().getURI());
+                
+                // Don't throw here - let the service handle retries
+                return Mono.just(clientResponse);
+            }
+            return Mono.just(clientResponse);
+        });
+    }
+    
+    // Retry specs (add YouTube retry spec)
     @Bean
     public Retry redditApiRetrySpec() {
         return Retry.backoff(redditConfig.getMaxRetries(), 
@@ -101,6 +160,19 @@ public class WebClientConfig {
             })
             .doAfterRetry(retrySignal -> 
                 logger.warn("Retrying Reddit API call, attempt: {}, error: {}", 
+                    retrySignal.totalRetries() + 1, retrySignal.failure().getMessage()));
+    }
+    
+    @Bean
+    public Retry youtubeApiRetrySpec() {
+        return Retry.backoff(youtubeConfig.getMaxRetries(), 
+                Duration.ofMillis(youtubeConfig.getRetryDelayMs()))
+            .filter(throwable -> {
+                // Retry on network issues and 5xx errors, not 4xx
+                return !(throwable instanceof WebClientResponseException.BadRequest);
+            })
+            .doAfterRetry(retrySignal -> 
+                logger.warn("Retrying YouTube API call, attempt: {}, error: {}", 
                     retrySignal.totalRetries() + 1, retrySignal.failure().getMessage()));
     }
 }
