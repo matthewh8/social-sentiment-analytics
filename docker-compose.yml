@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: socialsentiment-postgres
+    environment:
+      POSTGRES_DB: socialsentiment
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - socialsentiment-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: socialsentiment-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - socialsentiment-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  socialsentiment-network:
+    driver: bridge

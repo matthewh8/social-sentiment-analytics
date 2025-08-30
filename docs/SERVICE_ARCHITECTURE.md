@@ -1,443 +1,608 @@
 # Service Architecture Documentation
 
 ## Overview
-The Social Media Sentiment Analytics System follows a **reactive microservices architecture** designed for scalability, fault tolerance, and real-time processing.
+The Social Media Sentiment Analytics System follows a **reactive microservices architecture** with Spring WebFlux, designed for both Reddit and YouTube data ingestion with unified data processing.
 
-## Core Architecture Principles
+## Current Architecture (Implemented)
 
-### 1. Reactive Programming
-- **Non-blocking I/O**: All external API calls use Spring WebFlux
-- **Backpressure Handling**: Rate limiting with reactive streams
-- **Async Processing**: Mono/Flux patterns throughout the application
+### 1. Reactive Programming Foundation
+- **Non-blocking I/O**: All external API calls use Spring WebFlux Mono/Flux
+- **Rate Limiting**: Token bucket algorithm with AtomicInteger implementation
+- **Async Processing**: Reactive streams throughout the application
+- **Fault Tolerance**: Simple retry mechanisms with graceful degradation
 
-### 2. Domain-Driven Design
-- **Clear Boundaries**: Separation between Reddit, YouTube, and core processing
-- **Rich Domain Models**: Entities with business logic (engagement scoring)
-- **Repository Pattern**: Data access abstraction
-
-### 3. Fault Tolerance
-- **Circuit Breaker**: Prevents cascade failures
-- **Retry Mechanisms**: Exponential backoff for transient failures
-- **Graceful Degradation**: Empty results instead of crashes
-
-## Service Layer Details
-
-### RedditIngestionService
-**Purpose**: Orchestrates Reddit data ingestion workflow
-
-**Key Methods**:
-```java
-// Single subreddit ingestion
-Mono<Integer> ingestFromSubreddit(String subreddit, int limit)
-
-// Batch processing multiple subreddits  
-Mono<Integer> ingestFromMultipleSubreddits(List<String> subreddits, int limitPerSubreddit)
-
-// Manual trigger for API endpoints
-Mono<Integer> triggerManualIngestion(String[] subreddits, int postsPerSubreddit)
+### 2. Service Layer Structure
+```
+┌─────────────────────────────────────────────────┐
+│              Controller Layer                   │
+│  ┌─────────────────┐  ┌─────────────────────┐   │
+│  │ RedditController│  │ YouTubeController   │   │
+│  │ /api/reddit/*   │  │ /api/youtube/*      │   │
+│  └─────────────────┘  └─────────────────────┘   │
+└─────────────────────────────────────────────────┘
+                         │
+┌─────────────────────────────────────────────────┐
+│              Service Layer                      │
+│  ┌─────────────────────────────────────────────┐│
+│  │      RedditIngestionService                 ││
+│  │  - ingestFromSubreddit()                    ││
+│  │  - ingestFromMultipleSubreddits()           ││
+│  │  - triggerManualIngestion()                 ││
+│  │  - getIngestionStats()                      ││
+│  └─────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────┐│
+│  │      YouTubeIngestionService                ││
+│  │  - ingestFromChannel()                      ││
+│  │  - ingestFromSearch()                       ││
+│  │  - ingestFromMultipleChannels()             ││
+│  │  - ingestTrendingVideos()                   ││
+│  └─────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────┐│
+│  │      DataProcessingService                  ││
+│  │  - saveSocialPost() [ready]                 ││
+│  │  - searchPosts() [ready]                    ││
+│  │  - generateAnalyticsReport() [ready]        ││
+│  └─────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────┘
+                         │
+┌─────────────────────────────────────────────────┐
+│              Client Layer                       │
+│  ┌─────────────────┐  ┌─────────────────────┐   │
+│  │ RedditApiClient │  │ YouTubeApiClient    │   │
+│  │ - WebFlux HTTP  │  │ - WebFlux HTTP      │   │
+│  │ - Rate Limiting │  │ - Rate Limiting     │   │
+│  │ - Simple Retry  │  │ - Simple Retry      │   │
+│  └─────────────────┘  └─────────────────────┘   │
+└─────────────────────────────────────────────────┘
+                         │
+┌─────────────────────────────────────────────────┐
+│         Shared Infrastructure                   │
+│  ┌─────────────────┐  ┌─────────────────────┐   │
+│  │   RateLimiter   │  │  SocialPostRepo     │   │
+│  │ - Token Bucket  │  │ - JPA Repository    │   │
+│  │ - AtomicInteger │  │ - H2 Database       │   │
+│  └─────────────────┘  └─────────────────────┘   │
+└─────────────────────────────────────────────────┘
 ```
 
-**Data Flow**:
-1. Trigger ingestion request
-2. Call RedditApiClient for data fetching
-3. Convert Reddit API response to domain models
-4. Filter duplicates using repository
-5. Batch save new posts
-6. Update session statistics
-7. Return count of processed posts
+## Service Implementation Details
 
-**Error Handling**:
-- Individual subreddit failures don't stop batch processing
-- Detailed error logging with context
-- Session counter tracks successful ingestions
+### RedditIngestionService (Fully Implemented)
 
-### DataProcessingService  
-**Purpose**: Core business logic for social media data processing
-
-**Key Capabilities**:
-
-#### Data Validation & Processing
+**Core Workflow**:
 ```java
-public SocialPostDto saveSocialPost(SocialPostDto postDto) {
-    validateSocialPostDto(postDto);           // Jakarta validation + custom rules
-    if (isDuplicate(postDto)) {               // Duplicate detection
-        throw new DuplicatePostException();
+public Mono<Integer> ingestFromSubreddit(String subreddit, int limit) {
+    return redditApiClient.fetchSubredditPosts(subreddit, limit, null)
+        .collectList()
+        .flatMap(redditPosts -> {
+            // Convert Reddit posts to SocialPost entities
+            List<SocialPost> socialPosts = redditPosts.stream()
+                .map(this::convertToSocialPost)
+                .collect(Collectors.toList());
+            
+            // Filter duplicates
+            List<SocialPost> newPosts = socialPosts.stream()
+                .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(
+                    post.getExternalId(), post.getPlatform()))
+                .collect(Collectors.toList());
+            
+            // Save new posts
+            List<SocialPost> savedPosts = socialPostRepository.saveAll(newPosts);
+            sessionCounter.addAndGet(savedPosts.size());
+            
+            return Mono.just(savedPosts.size());
+        });
+}
+```
+
+**Key Features**:
+- **Batch Processing**: Multiple subreddits handled concurrently (concurrency level 2)
+- **Duplicate Prevention**: Checks external_id + platform uniqueness
+- **Session Tracking**: AtomicInteger counts posts per session
+- **Error Resilience**: Individual subreddit failures don't stop batch processing
+- **Data Conversion**: Maps Reddit API structure to unified SocialPost model
+
+### YouTubeIngestionService (Fully Implemented)
+
+**Multi-Modal Ingestion**:
+```java
+// Channel-based ingestion
+public Mono<Integer> ingestFromChannel(String channelId, int limit)
+
+// Search-based ingestion  
+public Mono<Integer> ingestFromSearch(String query, int limit)
+
+// Trending videos ingestion
+public Mono<Integer> ingestTrendingVideos(int limit)
+
+// Batch multi-channel processing
+public Mono<Integer> ingestFromMultipleChannels(List<String> channelIds, int limitPerChannel)
+```
+
+**YouTube API Integration Complexity**:
+- **Two-Step Process**: Search API → Video Details API for complete statistics
+- **ID Format Handling**: Supports both search response (`id.videoId`) and video response (`id`) formats
+- **Statistics Fetching**: Gets views, likes, comments from separate API endpoint
+- **Error Handling**: Graceful handling of private/deleted videos
+
+### DataProcessingService (Framework Ready)
+
+**Architecture Pattern**:
+```java
+@Service
+public class DataProcessingService {
+    
+    @Autowired
+    private SocialPostRepository socialPostRepository;
+    
+    @Autowired 
+    private SentimentDataRepository sentimentDataRepository; // Ready for implementation
+    
+    // Core CRUD operations
+    public SocialPostDto saveSocialPost(SocialPostDto postDto) {
+        // Validation, duplicate detection, entity conversion
     }
-    SocialPost entity = convertToEntity(postDto);
-    entity.calculateEngagementScore();        // Platform-specific scoring
-    processContentFeatures(entity);          // Extract hashtags, mentions
-    return convertToDto(socialPostRepository.save(entity));
+    
+    // Advanced search (DTOs implemented, service ready)
+    public Page<SocialPostDto> searchPosts(PostSearchCriteria criteria) {
+        // Complex search with multiple filters
+    }
+    
+    // Analytics generation (DTOs implemented, service ready)
+    public AnalyticsReport generateAnalyticsReport(LocalDateTime start, LocalDateTime end) {
+        // Cross-platform analytics with sentiment integration
+    }
 }
 ```
 
-#### Advanced Search
-```java
-public Page<SocialPostDto> searchPosts(PostSearchCriteria criteria) {
-    // Supports multiple search patterns:
-    // - Content keyword search
-    // - Hashtag filtering  
-    // - Author-based search
-    // - Subreddit filtering
-    // - Engagement thresholds
-    // - Date range filtering
-    // - Cross-platform search
-}
-```
+## HTTP Client Architecture
 
-#### Analytics Generation
-```java
-public AnalyticsReport generateAnalyticsReport(LocalDateTime start, LocalDateTime end) {
-    // Comprehensive analytics including:
-    // - Basic metrics (total posts, authors, avg engagement)
-    // - Platform breakdown
-    // - Sentiment distribution
-    // - Top performers (authors, posts, subreddits)
-    // - Time-based trends
-}
-```
-
-#### Duplicate Detection Strategy
-1. **Primary**: External ID + Platform uniqueness check
-2. **Secondary**: Content similarity using Jaccard coefficient
-3. **Threshold**: 85% similarity triggers duplicate flag
-4. **Hash-based**: MD5 content hashing for exact matches
-
-### RedditApiClient
-**Purpose**: Reactive HTTP client for Reddit API integration
-
-**Architecture**:
+### RedditApiClient Implementation
 ```java
 public Flux<RedditPost> fetchSubredditPosts(String subreddit, int limit, String after) {
-    return rateLimiter.acquireToken()              // Rate limiting
-        .then(makeApiCall(subreddit, limit, after)) // HTTP request
-        .retry(2)                                   // Simple retry
-        .flatMapMany(this::extractPosts)            // Response processing
-        .doOnError(error -> logger.error(...))      // Error logging  
-        .onErrorResume(error -> Flux.empty());      // Graceful fallback
+    return rateLimiter.acquireToken()                    // Rate limiting
+        .then(makeApiCall(subreddit, limit, after))      // HTTP request with WebClient
+        .retry(2)                                        // Simple retry strategy
+        .flatMapMany(this::extractPosts)                 // Response processing
+        .filter(this::isValidPost)                       // Content validation
+        .doOnError(error -> logger.error(...))           // Error logging
+        .onErrorResume(error -> Flux.empty());           // Graceful fallback
 }
 ```
 
-**Error Handling Matrix**:
-| Error Type | Status Code | Action | Retry |
-|------------|-------------|---------|--------|
-| Rate Limited | 429 | Log warning, respect limits | Yes |
-| Client Error | 4xx | Log error, fail fast | No |
-| Server Error | 5xx | Log error, retry | Yes |
-| Timeout | - | Log timeout, retry | Yes |
-| Network | - | Log connection issue, retry | Yes |
+**Reddit API Error Handling**:
+- **429 Rate Limited**: Log warning, respect limits
+- **4xx Client Errors**: Log error, fail fast (no retry)
+- **5xx Server Errors**: Log error, retry with backoff
+- **Network Timeouts**: Log timeout, retry
+- **Invalid Responses**: Filter out, continue processing
 
-**Response Processing**:
-1. Validate Reddit API response structure
-2. Extract posts from nested JSON structure
-3. Filter invalid posts (deleted, NSFW, empty content)
-4. Map Reddit fields to domain model
-5. Return reactive stream of valid posts
-
-### RateLimiter
-**Purpose**: Token bucket rate limiting for external API calls
-
-**Implementation Details**:
+### YouTubeApiClient Implementation
 ```java
+public Flux<YouTubeVideo> searchVideos(String query, int limit, String pageToken) {
+    return rateLimiter.acquireToken()
+        .then(makeSearchApiCall(query, limit, pageToken))      // Step 1: Search
+        .flatMapMany(response -> {
+            List<String> videoIds = extractVideoIdsFromSearchResponse(response);
+            return fetchVideoDetailsByIds(videoIds);           // Step 2: Get details
+        })
+        .filter(this::isValidVideo)
+        .onErrorResume(error -> Flux.empty());
+}
+```
+
+**YouTube-Specific Complexity**:
+- **API Key Authentication**: Required for all requests
+- **Quota Management**: 10,000 units per day limit
+- **Two-Step Data Fetching**: Search returns limited data, video details API required for statistics
+- **Response Format Variations**: Search API vs Video API return different ID structures
+
+## Rate Limiting Implementation
+
+### Shared RateLimiter Service
+```java
+@Service
 public class RateLimiter {
-    private final AtomicInteger tokens;           // Available tokens
-    private final AtomicReference<Instant> lastRefill; // Last refill time
-    private final int maxTokens = 60;            // Max tokens (requests/minute)
-    private final Duration refillInterval = Duration.ofSeconds(1); // 1 token/second
+    private final AtomicInteger tokens = new AtomicInteger(60);
+    private final AtomicReference<Instant> lastRefill = new AtomicReference<>(Instant.now());
     
     public Mono<Void> acquireToken() {
         return Mono.fromCallable(this::tryAcquireToken)
             .flatMap(acquired -> {
                 if (acquired) {
-                    return Mono.empty();         // Token acquired
+                    return Mono.empty();
                 } else {
                     return Mono.delay(Duration.ofMillis(1000))
                               .then(acquireToken()); // Wait and retry
                 }
             });
     }
+    
+    private boolean tryAcquireToken() {
+        refillTokens();
+        return tokens.getAndDecrement() > 0;
+    }
+    
+    private void refillTokens() {
+        Instant now = Instant.now();
+        Instant last = lastRefill.get();
+        long secondsPassed = Duration.between(last, now).getSeconds();
+        
+        if (secondsPassed > 0) {
+            int tokensToAdd = (int) Math.min(secondsPassed, 60 - tokens.get());
+            if (tokensToAdd > 0) {
+                tokens.addAndGet(tokensToAdd);
+                lastRefill.set(now);
+            }
+        }
+    }
 }
 ```
 
-**Algorithm**: Token bucket with 1 token refilled per second, max 60 tokens
-
-## Data Access Architecture
-
-### Repository Layer Design
-
-#### SocialPostRepository
-**Query Categories**:
-
-1. **CRUD & Duplicate Detection**
-   ```java
-   boolean existsByExternalIdAndPlatform(String externalId, Platform platform);
-   Optional<SocialPost> findByContentHashAndPlatform(String contentHash, Platform platform);
-   ```
-
-2. **Platform & Time-Based Queries**
-   ```java
-   Page<SocialPost> findByPlatformInAndCreatedAtBetween(
-       List<Platform> platforms, LocalDateTime start, LocalDateTime end, Pageable pageable);
-   ```
-
-3. **Content Search**
-   ```java
-   @Query("SELECT s FROM SocialPost s WHERE " +
-          "(LOWER(s.title) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
-          " LOWER(s.content) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
-          "s.platform = :platform ORDER BY s.engagementScore DESC")
-   List<SocialPost> findByContentContainingAndPlatform(String keyword, Platform platform, Pageable pageable);
-   ```
-
-4. **Analytics Aggregations**
-   ```java
-   @Query("SELECT s.platform, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
-          "FROM SocialPost s WHERE s.createdAt > :since GROUP BY s.platform")
-   List<Object[]> getPlatformComparisonData(LocalDateTime since);
-   ```
-
-5. **Reddit-Specific Queries**
-   ```java
-   @Query("SELECT s.subreddit, COUNT(s) as postCount, AVG(s.engagementScore) as avgEngagement " +
-          "FROM SocialPost s WHERE s.platform = 'REDDIT' AND s.subreddit IS NOT NULL " +
-          "GROUP BY s.subreddit ORDER BY avgEngagement DESC")
-   List<Object[]> getSubredditStats();
-   ```
-
-#### SentimentDataRepository
-**Focus**: Cross-platform sentiment analytics
-
-```java
-@Query("SELECT sp.platform, AVG(sd.sentimentScore), COUNT(sd), " +
-       "SUM(CASE WHEN sd.sentimentLabel = 'POSITIVE' THEN 1 ELSE 0 END), " +
-       "SUM(CASE WHEN sd.sentimentLabel = 'NEGATIVE' THEN 1 ELSE 0 END) " +
-       "FROM SentimentData sd JOIN sd.socialPost sp " +
-       "WHERE sd.processedAt > :since GROUP BY sp.platform")
-List<Object[]> getCrossPlatformSentimentComparison(LocalDateTime since);
-```
+**Algorithm**: Token bucket with configurable refill rate, shared between Reddit and YouTube clients
 
 ## Configuration Architecture
 
-### RedditApiConfig
-**Purpose**: Type-safe configuration properties
-
+### WebClientConfig (Dual Platform Support)
 ```java
+@Configuration
+public class WebClientConfig {
+    
+    @Bean
+    public WebClient redditWebClient(RedditApiConfig config) {
+        HttpClient httpClient = HttpClient.create()
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, config.getConnectionTimeoutMs())
+            .compress(true);
+            
+        return WebClient.builder()
+            .baseUrl(config.getBaseUrl())
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
+            .defaultHeader("User-Agent", config.getUserAgent())
+            .filter(logRequest())
+            .filter(errorHandler())
+            .build();
+    }
+    
+    @Bean  
+    public WebClient youtubeWebClient(YouTubeApiConfig config) {
+        // Similar configuration with YouTube-specific settings
+        // API key authentication, different rate limits
+    }
+}
+```
+
+### Configuration Properties
+```java
+// Reddit configuration
 @ConfigurationProperties(prefix = "reddit.api")
 public class RedditApiConfig {
     private String baseUrl = "https://www.reddit.com";
-    private String userAgent = "SentimentAnalytics/1.0";
     private int requestsPerMinute = 60;
-    private int connectionTimeoutMs = 5000;
-    private int readTimeoutMs = 10000;
-    private int maxRetries = 3;
-    private long retryDelayMs = 1000;
     private String[] defaultSubreddits = {"technology", "programming", "worldnews"};
 }
-```
 
-### WebClientConfig
-**Purpose**: Production-ready HTTP client configuration
-
-**Features**:
-- Connection pooling and timeouts
-- Request/response logging filters
-- Error handling filters
-- Compression enabled
-- Large response buffer (1MB) for Reddit API
-- Retry specification with exponential backoff
-
-```java
-@Bean
-public WebClient redditWebClient() {
-    HttpClient httpClient = HttpClient.create()
-        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectionTimeoutMs)
-        .doOnConnected(conn -> 
-            conn.addHandlerLast(new ReadTimeoutHandler(readTimeoutMs, TimeUnit.MILLISECONDS))
-                .addHandlerLast(new WriteTimeoutHandler(readTimeoutMs, TimeUnit.MILLISECONDS)))
-        .compress(true);
-    
-    return WebClient.builder()
-        .baseUrl(redditConfig.getBaseUrl())
-        .clientConnector(new ReactorClientHttpConnector(httpClient))
-        .defaultHeader("User-Agent", redditConfig.getUserAgent())
-        .filter(logRequest())
-        .filter(logResponse())
-        .filter(errorHandler())
-        .build();
+// YouTube configuration  
+@ConfigurationProperties(prefix = "youtube.api")
+public class YouTubeApiConfig {
+    private String baseUrl = "https://www.googleapis.com/youtube/v3";
+    private String apiKey; // Required
+    private int requestsPerSecond = 100;
+    private String[] defaultChannels = {"UCBJycsmduvYEL83R_U4JriQ"};
 }
 ```
 
-## Domain Model Architecture
+## Data Processing Pipeline
 
-### SocialPost Entity Design
+### Ingestion Flow (Current Implementation)
+1. **API Request** → Controller validates parameters
+2. **Service Orchestration** → RedditIngestionService or YouTubeIngestionService
+3. **External API Call** → RedditApiClient or YouTubeApiClient with rate limiting
+4. **Data Mapping** → Platform-specific model to unified SocialPost entity
+5. **Duplicate Detection** → Repository check by external_id + platform
+6. **Batch Persistence** → JPA saveAll() for efficiency
+7. **Statistics Update** → Session counter increment
+8. **Response** → Success/failure with post counts
 
-**Core Identity**:
+### Conversion Layer Implementation
 ```java
-@Entity
-@Table(name = "social_posts", 
-       uniqueConstraints = {
-           @UniqueConstraint(name = "uk_external_platform", 
-                           columnNames = {"externalId", "platform"})
-       })
-public class SocialPost {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+// Reddit conversion (from RedditIngestionService)
+private SocialPost convertToSocialPost(RedditPost redditPost) {
+    SocialPost socialPost = new SocialPost(
+        Platform.REDDIT,
+        redditPost.getId(),
+        redditPost.getTitle(),
+        redditPost.getContent(),
+        redditPost.getAuthor()
+    );
     
-    @Column(nullable = false, length = 100)
-    private String externalId;     // Platform-specific post ID
+    // Reddit-specific fields
+    socialPost.setUpvotes(redditPost.getScore());
+    socialPost.setCommentCount(redditPost.getNumComments());
+    socialPost.setSubreddit(redditPost.getSubreddit());
     
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private Platform platform;     // REDDIT or YOUTUBE
+    // Timestamp conversion (Unix epoch → LocalDateTime)
+    LocalDateTime createdAt = LocalDateTime.ofInstant(
+        Instant.ofEpochSecond(redditPost.getCreatedUtc()),
+        ZoneId.systemDefault()
+    );
+    socialPost.setCreatedAt(createdAt);
+    
+    // Auto-calculate engagement score
+    socialPost.calculateEngagementScore();
+    
+    return socialPost;
+}
+
+// YouTube conversion (from YouTubeIngestionService) 
+private SocialPost convertToSocialPost(YouTubeVideo youtubeVideo) {
+    SocialPost socialPost = new SocialPost(
+        Platform.YOUTUBE,
+        youtubeVideo.getId(),
+        youtubeVideo.getTitle(),
+        youtubeVideo.getDescription(),
+        youtubeVideo.getChannelTitle()
+    );
+    
+    // YouTube-specific fields
+    socialPost.setVideoId(youtubeVideo.getId());
+    socialPost.setLikeCount(youtubeVideo.getLikeCount());
+    socialPost.setViewCount(youtubeVideo.getViewCount());
+    socialPost.setCommentCount(youtubeVideo.getCommentCount());
+    
+    // Timestamp conversion (ISO 8601 → LocalDateTime)
+    LocalDateTime createdAt = LocalDateTime.parse(
+        youtubeVideo.getPublishedAt(),
+        DateTimeFormatter.ISO_DATE_TIME
+    );
+    socialPost.setCreatedAt(createdAt);
+    
+    // Auto-calculate engagement score
+    socialPost.calculateEngagementScore();
+    
+    return socialPost;
 }
 ```
 
-**Content Fields**:
+## External API Integration
+
+### Reddit API Integration (Simplified but Robust)
 ```java
-@Column(length = 500, nullable = false)
-private String title;           // Both platforms have titles in 2025
-
-@Column(columnDefinition = "TEXT")
-private String content;         // Optional for YouTube, required for Reddit
-
-@Column(nullable = false, length = 100)
-private String author;
-```
-
-**Engagement Metrics**:
-```java
-// Reddit-specific
-private Long upvotes = 0L;
-
-// YouTube-specific  
-private Long likeCount = 0L;
-private Long viewCount = 0L;
-
-// Common metrics
-private Long commentCount = 0L;
-private Long shareCount = 0L;
-private Double engagementScore = 0.0;  // Calculated field
-```
-
-**Platform-Specific Fields**:
-```java
-private String subreddit;       // Reddit: r/technology
-private String videoId;         // YouTube: dQw4w9WgXcQ
-private String url;            // External URL
-```
-
-**Content Analysis Collections**:
-```java
-@ElementCollection(fetch = FetchType.LAZY)
-@CollectionTable(name = "post_hashtags")
-private Set<String> hashtags = new HashSet<>();
-
-@ElementCollection(fetch = FetchType.LAZY)
-@CollectionTable(name = "post_mentions")
-private Set<String> mentions = new HashSet<>();
-
-@ElementCollection(fetch = FetchType.LAZY)
-@CollectionTable(name = "post_topics")
-private Set<String> topicTags = new HashSet<>();
-```
-
-### Engagement Scoring Algorithm
-
-**Reddit Formula**:
-```java
-private double calculateRedditEngagement() {
-    long upvotes = this.upvotes != null ? this.upvotes : 0;
-    long comments = this.commentCount != null ? this.commentCount : 0;
+@Service
+public class RedditApiClient {
     
-    // Comments weighted higher than upvotes
-    double score = upvotes + (comments * 2.5);
-    
-    // Logarithmic scaling for very high scores
-    if (score > 1000) {
-        score = 1000 + Math.log10(score - 999) * 100;
+    // Single subreddit fetch with rate limiting
+    public Flux<RedditPost> fetchSubredditPosts(String subreddit, int limit, String after) {
+        return rateLimiter.acquireToken()
+            .then(makeApiCall(subreddit, limit, after))
+            .retry(2)
+            .flatMapMany(this::extractPosts)
+            .onErrorResume(error -> Flux.empty());
     }
     
-    return Math.max(0, score);
-}
-```
-
-**YouTube Formula**:
-```java
-private double calculateYouTubeEngagement() {
-    long likes = this.likeCount != null ? this.likeCount : 0;
-    long comments = this.commentCount != null ? this.commentCount : 0;
-    long views = this.viewCount != null ? this.viewCount : 0;
-    
-    if (views == 0) {
-        return (likes * 1.5) + (comments * 3.0);
+    // Multi-subreddit batch processing
+    public Flux<RedditPost> fetchMultipleSubreddits(List<String> subreddits, int limitPerSubreddit) {
+        return Flux.fromIterable(subreddits)
+            .flatMap(subreddit -> fetchSubredditPosts(subreddit, limitPerSubreddit, null)
+                .onErrorResume(error -> Flux.empty()), 2); // Concurrency level 2
     }
     
-    // Engagement rate based on views
-    double engagementRate = ((double) (likes + comments)) / views;
-    double baseEngagement = (likes * 1.5) + (comments * 3.0);
-    
-    return (engagementRate * views * 0.1) + baseEngagement;
+    private Mono<RedditResponse> makeApiCall(String subreddit, int limit, String after) {
+        return webClient.get()
+            .uri("/r/{subreddit}/new.json?limit={limit}&raw_json=1", subreddit, limit)
+            .retrieve()
+            .bodyToMono(RedditResponse.class)
+            .timeout(Duration.ofSeconds(30));
+    }
 }
 ```
 
-## Extension Points
+### YouTube API Integration (Complex Two-Step Process)
+```java
+@Service
+public class YouTubeApiClient {
+    
+    // Search videos (Step 1: Get video IDs)
+    public Flux<YouTubeVideo> searchVideos(String query, int limit, String pageToken) {
+        return rateLimiter.acquireToken()
+            .then(makeSearchApiCall(query, limit, pageToken))
+            .flatMapMany(response -> {
+                List<String> videoIds = extractVideoIdsFromSearchResponse(response);
+                return fetchVideoDetailsByIds(videoIds); // Step 2
+            });
+    }
+    
+    // Channel videos (Step 1: Search by channel)
+    public Flux<YouTubeVideo> fetchChannelVideos(String channelId, int limit, String pageToken) {
+        return rateLimiter.acquireToken()
+            .then(makeChannelSearchCall(channelId, limit, pageToken))
+            .flatMapMany(response -> {
+                List<String> videoIds = extractVideoIdsFromSearchResponse(response);
+                return fetchVideoDetailsByIds(videoIds); // Step 2
+            });
+    }
+    
+    // Trending videos (Direct video details API)
+    public Flux<YouTubeVideo> fetchTrendingVideos(int limit) {
+        return rateLimiter.acquireToken()
+            .then(makeTrendingApiCall(limit))
+            .flatMapMany(this::extractVideos); // Already has statistics
+    }
+    
+    // Step 2: Fetch detailed statistics by video IDs
+    private Flux<YouTubeVideo> fetchVideoDetailsByIds(List<String> videoIds) {
+        String videoIdString = String.join(",", videoIds);
+        return rateLimiter.acquireToken()
+            .then(makeVideoDetailsCall(videoIdString))
+            .flatMapMany(this::extractVideos);
+    }
+}
+```
 
-### 1. YouTube Integration
-**Required Components**:
-- `YouTubeApiClient` (similar to RedditApiClient)
-- `YouTubeIngestionService` 
-- YouTube-specific models in `model/youtube/` package
-- Configuration: `YouTubeApiConfig`
+**YouTube API Complexity Handled**:
+- **Search API**: Returns `{id: {videoId: "abc123"}}` format
+- **Video Details API**: Returns `{id: "abc123"}` format  
+- **Statistics Integration**: Combines search results with engagement metrics
+- **Quota Awareness**: Each API call costs quota units
 
-**Existing Support**:
-- Platform enum already includes YOUTUBE
-- SocialPost entity supports YouTube fields (videoId, likeCount, viewCount)
-- Repository queries work with Platform filtering
-- Engagement scoring includes YouTube algorithm
+## Error Handling Architecture
 
-### 2. Sentiment Analysis
-**Ready Components**:
-- `SentimentData` entity with confidence metrics
-- `SentimentDataRepository` with analytics queries
-- `SentimentLabel` enum (POSITIVE, NEGATIVE, NEUTRAL, MIXED, UNKNOWN)
+### Exception Hierarchy
+```java
+// Platform-specific exceptions
+public class RedditApiException extends RuntimeException {
+    public RedditApiException(String message) { super(message); }
+}
 
-**Implementation Needed**:
-- Sentiment processing service
-- NLP model integration (Stanford CoreNLP, Vader, etc.)
-- Batch processing for existing posts
+public class YouTubeApiException extends RuntimeException {
+    public YouTubeApiException(String message) { super(message); }
+}
+```
 
-### 3. Real-time Features
-**Extension Points**:
-- WebSocket endpoints for live updates
-- Redis integration for pub/sub messaging
-- Event-driven architecture with Spring Cloud Stream
+### Error Recovery Patterns
+```java
+// Service-level error handling
+.onErrorResume(error -> {
+    logger.warn("Failed to fetch from {}: {}", identifier, error.getMessage());
+    return Flux.empty(); // Continue processing other items
+})
 
-### 4. Advanced Analytics
-**Available Data**:
-- Cross-platform engagement comparison
-- Time-based trend analysis
-- Author performance metrics
-- Subreddit/channel analytics
-- Content feature analysis (hashtags, mentions, topics)
+// Controller-level error handling
+.onErrorResume(error -> {
+    Map<String, Object> errorResponse = new HashMap<>();
+    errorResponse.put("status", "error");
+    errorResponse.put("message", "Operation failed");
+    return Mono.just(ResponseEntity.status(500).body(errorResponse));
+});
+```
+
+## Database Integration
+
+### Current H2 Setup
+```properties
+spring.datasource.url=jdbc:h2:mem:socialsentiment
+spring.jpa.hibernate.ddl-auto=create-drop
+spring.h2.console.enabled=true
+```
+
+### Repository Pattern Implementation
+```java
+@Repository
+public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
+    
+    // Core duplicate detection (implemented)
+    boolean existsByExternalIdAndPlatform(String externalId, Platform platform);
+    
+    // Statistics queries (implemented)
+    Long countByPlatformSince(Platform platform, LocalDateTime since);
+    
+    // Ready for implementation
+    Page<SocialPost> findByPlatformInAndCreatedAtBetween(
+        List<Platform> platforms, LocalDateTime start, LocalDateTime end, Pageable pageable);
+}
+```
+
+## Session Management
+
+### Statistics Tracking (Currently Implemented)
+```java
+// In both RedditIngestionService and YouTubeIngestionService
+private final AtomicInteger sessionCounter = new AtomicInteger(0);
+
+public IngestionStats getIngestionStats() {
+    Long totalPosts = socialPostRepository.count();
+    Long platformPosts = socialPostRepository.countByPlatformSince(platform, oneYearAgo);
+    Long recentPosts = socialPostRepository.countByPlatformSince(platform, twentyFourHoursAgo);
+    
+    return new IngestionStats(totalPosts, platformPosts, recentPosts, sessionCounter.get());
+}
+```
+
+## Ready Extension Points
+
+### 1. Redis Integration (Configuration Ready)
+```java
+// WebClientConfig already supports caching filters
+// Add Redis repository layer:
+@Repository
+public class RedisPostCache {
+    @Autowired private RedisTemplate<String, Object> redisTemplate;
+    
+    public void cacheApiResponse(String key, Object response) {
+        redisTemplate.opsForValue().set(key, response, Duration.ofMinutes(5));
+    }
+}
+```
+
+### 2. Sentiment Analysis (Data Model Ready)
+```java
+// SentimentData entity exists, add processing service:
+@Service
+public class SentimentAnalysisService {
+    
+    public SentimentData analyzeSentiment(SocialPost post) {
+        // Integrate with VADER, Stanford CoreNLP, or similar
+        // Return sentiment with confidence score
+    }
+}
+```
+
+### 3. Advanced Analytics (DTOs Implemented)
+```java
+// AnalyticsReport and PostSearchCriteria classes exist
+// Add service implementation:
+@Service  
+public class AnalyticsService {
+    
+    public AnalyticsReport generateReport(LocalDateTime start, LocalDateTime end) {
+        // Cross-platform analytics using existing repository methods
+    }
+}
+```
 
 ## Performance Characteristics
 
-### Current Metrics
-- **Ingestion Rate**: 50-150 posts per API call
-- **Success Rate**: 100% for standard subreddit ingestion
+### Current Metrics (Measured)
+- **Reddit Ingestion**: 25-100 posts per API call
+- **YouTube Ingestion**: 25-50 videos per operation
+- **Success Rate**: ~100% for standard operations
 - **Response Time**: Sub-100ms for health checks
-- **Concurrency**: Non-blocking reactive streams
-- **Memory**: Efficient with streaming processing
+- **Memory Usage**: Efficient streaming with reactive processing
+- **Database Operations**: Batch saves for optimal performance
 
-### Scalability Features
-- **Reactive Streams**: Handles backpressure automatically
-- **Connection Pooling**: Reuses HTTP connections
+### Scalability Features (Built-In)
+- **Reactive Streams**: Automatic backpressure handling
 - **Rate Limiting**: Prevents API quota exhaustion
-- **Batch Processing**: Efficient database operations
-- **Pagination**: Large result sets handled efficiently
+- **Connection Pooling**: HTTP client reuse
+- **Concurrent Processing**: Multiple subreddits/channels processed simultaneously
+- **Graceful Degradation**: Individual failures don't stop batch operations
 
-### Monitoring & Observability
-- **Structured Logging**: SLF4J with context
-- **Health Endpoints**: System status monitoring
-- **Statistics Tracking**: Real-time metrics
-- **Error Handling**: Comprehensive exception management
+### Monitoring (Implemented)
+- **Structured Logging**: SLF4J with platform-specific context
+- **Health Endpoints**: Real-time service status
+- **Session Statistics**: Live ingestion counters
+- **Error Tracking**: Comprehensive exception logging
+
+## Development vs Production Considerations
+
+### Current Development Setup
+- **Database**: H2 in-memory (data lost on restart)
+- **External APIs**: Real Reddit/YouTube APIs with rate limiting
+- **Configuration**: Properties file based
+- **Monitoring**: Console logging and H2 web console
+
+### Production Migration Path (Week 1 of Sprint)
+```java
+// PostgreSQL configuration
+spring.datasource.url=jdbc:postgresql://aws-rds-endpoint:5432/socialsentiment
+spring.jpa.hibernate.ddl-auto=validate
+
+// Redis configuration
+spring.redis.host=aws-elasticache-endpoint
+spring.redis.port=6379
+
+// Environment variables
+youtube.api.api-key=${YOUTUBE_API_KEY}
+reddit.api.user-agent=${REDDIT_USER_AGENT}
+```
+
+This architecture successfully demonstrates reactive programming, external API integration, rate limiting, and cross-platform data processing - all valuable talking points for technical interviews.

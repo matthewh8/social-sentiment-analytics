@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.validation.annotation.Validated;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
+import jakarta.annotation.PostConstruct;
 import java.util.Arrays;
 
 @ConfigurationProperties(prefix = "youtube.api")
