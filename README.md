@@ -5,7 +5,7 @@ A reactive Spring Boot application for ingesting and analyzing social media data
 ## Project Overview
 
 **Current Status**: Dual-platform ingestion system with Reddit and YouTube APIs fully operational  
-**Tech Stack**: Java 17, Spring Boot 3.5.4, Spring WebFlux, H2 Database, Maven  
+**Tech Stack**: Java 17, Spring Boot 3.5.4, Spring WebFlux, PostgreSQL, Redis, Docker, Maven  
 **Architecture**: Reactive microservices with rate limiting and duplicate detection  
 
 ## Features
@@ -13,6 +13,8 @@ A reactive Spring Boot application for ingesting and analyzing social media data
 ### Implemented
 - **Reddit Integration**: Subreddit-based ingestion with trending posts support
 - **YouTube Integration**: Channel-based, search-based, and trending video ingestion  
+- **PostgreSQL Database**: Production-ready database with Docker containerization
+- **Redis Support**: Ready for caching layer integration
 - **Reactive Processing**: Non-blocking I/O with Spring WebFlux Mono/Flux patterns
 - **Rate Limiting**: Token bucket algorithm respecting API quotas
 - **Duplicate Prevention**: External ID + platform uniqueness checks
@@ -31,18 +33,29 @@ A reactive Spring Boot application for ingesting and analyzing social media data
 ### Prerequisites
 - Java 17 or higher
 - Maven 3.6+
+- Docker and Docker Compose
 - YouTube Data API v3 key (required for YouTube features)
 
 ### Setup
+
+**1. Clone and navigate to project:**
 ```bash
-# Clone the repository
 git clone [your-repo-url]
-cd social-media-sentiment-analytics
+cd social-media-sentiment-analytics/services/data.ingestion.service
+```
 
-# Configure YouTube API key
+**2. Start database services:**
+```bash
+docker compose up -d
+```
+
+**3. Configure YouTube API key:**
+```bash
 echo "youtube.api.api-key=YOUR_API_KEY_HERE" >> src/main/resources/application.properties
+```
 
-# Run the application
+**4. Run the application:**
+```bash
 ./mvnw spring-boot:run
 ```
 
@@ -58,11 +71,12 @@ echo "youtube.api.api-key=YOUR_API_KEY_HERE" >> src/main/resources/application.p
 
 ### Test Basic Functionality
 ```bash
+# Health checks
+curl http://localhost:8080/api/reddit/health
+curl http://localhost:8080/api/youtube/health
+
 # Reddit ingestion
 curl -X POST "http://localhost:8080/api/reddit/ingest?subreddits=technology&postsPerSubreddit=10"
-
-# YouTube channel ingestion (MKBHD channel)  
-curl -X POST "http://localhost:8080/api/youtube/ingest/channel/UCBJycsmduvYEL83R_U4JriQ?limit=10"
 
 # YouTube search ingestion
 curl -X POST "http://localhost:8080/api/youtube/ingest/search" \
@@ -104,12 +118,19 @@ GET /api/posts/test            # Connectivity test
 
 ## Database Access
 
-**H2 Console**: http://localhost:8080/h2-console
-- **JDBC URL**: `jdbc:h2:mem:socialsentiment`
-- **Username**: `sa`
-- **Password**: (empty)
+### PostgreSQL (Production Database)
+**Connection Details:**
+- Host: localhost:5433
+- Database: socialsentiment
+- Username: postgres
+- Password: password123
 
-**Sample Queries**:
+**Connect via psql:**
+```bash
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment
+```
+
+**Sample Queries:**
 ```sql
 -- View all posts
 SELECT * FROM social_posts ORDER BY created_at DESC LIMIT 20;
@@ -132,10 +153,29 @@ FROM social_posts
 GROUP BY platform;
 ```
 
+### Redis (Caching Layer)
+**Connection Details:**
+- Host: localhost:6379
+- Ready for caching implementation
+
+**Test Redis:**
+```bash
+docker exec -it socialsentiment-redis redis-cli ping
+```
+
 ## Configuration
 
 ### Default Settings
 ```properties
+# PostgreSQL Database
+spring.datasource.url=jdbc:postgresql://localhost:5433/socialsentiment
+spring.datasource.username=postgres
+spring.datasource.password=password123
+
+# Redis Configuration  
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+
 # Reddit API  
 reddit.api.base-url=https://www.reddit.com
 reddit.api.requests-per-minute=60
@@ -146,10 +186,6 @@ youtube.api.base-url=https://www.googleapis.com/youtube/v3
 youtube.api.requests-per-second=100
 youtube.api.quota-units-per-day=10000
 youtube.api.default-channels=UCBJycsmduvYEL83R_U4JriQ,UCXuqSBlHAE6Xw-yeJA0Tunw
-
-# Database (H2 development)
-spring.datasource.url=jdbc:h2:mem:socialsentiment
-spring.jpa.hibernate.ddl-auto=create-drop
 ```
 
 ### Customization
@@ -164,6 +200,45 @@ youtube.api.default-channels=YOUR_CHANNEL_ID_1,YOUR_CHANNEL_ID_2
 # Rate limiting
 reddit.api.requests-per-minute=30
 youtube.api.requests-per-second=50
+```
+
+## Docker Services
+
+### Current Setup
+The application uses Docker Compose for database services:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5433:5432"  # Avoids conflict with system PostgreSQL
+    environment:
+      POSTGRES_DB: socialsentiment
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+```
+
+### Managing Services
+```bash
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs postgres
+docker compose logs redis
+
+# Stop services
+docker compose down
+
+# Reset database (removes all data)
+docker compose down -v
+docker compose up -d
 ```
 
 ## Development
@@ -181,20 +256,31 @@ youtube.api.requests-per-second=50
 ```
 
 ### Development Database
-The application uses H2 in-memory database that resets on each restart:
-- **Pro**: Clean state, no setup required
-- **Con**: Data lost between restarts
-- **Migration Path**: Ready for PostgreSQL deployment
+The application uses PostgreSQL in Docker containers:
+- **Pro**: Production-like environment, persistent data, proper indexing
+- **Con**: Requires Docker setup
+- **Migration Path**: Ready for AWS RDS deployment
 
 ### Logging
 View detailed logs during development:
 ```bash
 # In application.properties
 logging.level.com.socialmedia=DEBUG
-logging.level.org.springframework.web.reactive=DEBUG
+logging.level.org.springframework.web.reactive.function.client=DEBUG
 ```
 
 ## Architecture Decisions
+
+### Why PostgreSQL with Docker
+- **Production Ready**: Same database as production deployment
+- **Performance**: Proper indexing and constraints
+- **Isolation**: Separate from system PostgreSQL on different port
+- **Scalability**: Ready for cloud deployment
+
+### Why Port 5433
+- **Conflict Avoidance**: System PostgreSQL typically uses 5432
+- **Development Safety**: Won't interfere with existing databases
+- **Clear Separation**: Docker vs system services
 
 ### Why Spring WebFlux
 - **Non-blocking I/O**: Handle multiple API calls efficiently
@@ -206,54 +292,60 @@ logging.level.org.springframework.web.reactive=DEBUG
 - **Consistent Processing**: Same sentiment analysis for all platforms
 - **Scalable Design**: Easy to add new platforms (Twitter, TikTok, etc.)
 
-### Why Token Bucket Rate Limiting
-- **API Respect**: Prevents quota exhaustion
-- **Burst Handling**: Allows short bursts within limits
-- **Shared Resource**: One rate limiter for multiple API clients
-
 ## Performance Metrics
 
 ### Measured Performance
 - **Reddit Ingestion**: 25-100 posts per API call
 - **YouTube Ingestion**: 25-50 videos per operation  
 - **Response Time**: <100ms for health endpoints
-- **Success Rate**: 100% for standard operations
+- **Database Performance**: Optimized with proper indexes
 - **Memory Usage**: Efficient reactive streaming
 
 ### Scalability Features
 - **Concurrent Processing**: Multiple subreddits/channels processed simultaneously
 - **Rate Limit Compliance**: Automatic throttling prevents API blocks
 - **Graceful Degradation**: Individual platform failures don't stop other processing
-- **Efficient Batching**: Database saves optimized for bulk operations
+- **Efficient Database**: PostgreSQL with proper indexing and constraints
 
 ## Troubleshooting
 
 ### Common Issues
 
-**YouTube API Key Error**:
+**Port Conflicts:**
+```bash
+# If you see "port 5433 already in use"
+docker compose down
+lsof -i :5433
+# Kill any conflicting processes
+```
+
+**YouTube API Key Error:**
 ```bash
 # Error: 403 Forbidden
 # Solution: Check API key in application.properties
 youtube.api.api-key=YOUR_VALID_API_KEY
 ```
 
-**Reddit Rate Limiting**:
+**Database Connection Issues:**
 ```bash
-# Error: Too many requests
-# Solution: Rate limiter automatically handles this, wait 60 seconds
+# Check if containers are running
+docker compose ps
+
+# Check container logs
+docker compose logs postgres
+
+# Test direct connection
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment
 ```
 
-**Database Connection**:
+**Application Won't Start:**
 ```bash
-# Error: Cannot connect to database
-# Solution: H2 is in-memory, restart application to reset
-```
+# Check if databases are ready
+docker compose ps
+# Wait for postgres to show "healthy" status
 
-**No Posts Ingested**:
-```bash
-# Check logs for API errors
-# Verify subreddit/channel names are correct
-# Check internet connectivity
+# Check application logs for specific errors
+./mvnw spring-boot:run
 ```
 
 ### Debug Mode
@@ -261,25 +353,25 @@ youtube.api.api-key=YOUR_VALID_API_KEY
 # Run with debug logging
 ./mvnw spring-boot:run -Dspring.profiles.active=debug
 
-# Check H2 console for data
-# Browser: http://localhost:8080/h2-console
+# Check database directly
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment
 ```
 
 ## Next Development Phase
 
 This project is designed for a 2-week enhancement sprint to add:
 
-### Week 1: Infrastructure Enhancement
-- PostgreSQL migration from H2
-- Redis caching layer  
-- AWS deployment (RDS + ElastiCache)
-- Basic sentiment analysis integration
+### Week 1: Advanced Features
+- Sentiment analysis integration (VADER or Stanford CoreNLP)
+- Redis caching implementation
+- Advanced search endpoints
+- Analytics report generation
 
 ### Week 2: Frontend Development
 - React dashboard for data visualization
 - Real-time updates with polling/WebSocket
 - Analytics charts and trend visualization
-- Complete full-stack deployment
+- Complete full-stack deployment on AWS
 
 ## Contributing
 
@@ -300,9 +392,9 @@ This project is designed for a 2-week enhancement sprint to add:
 
 ## Documentation
 
-- **API Documentation**: Complete REST endpoint reference
-- **Data Model**: Database schema and entity relationships  
-- **Service Architecture**: Detailed service layer design
+- **API Documentation**: Complete REST endpoint reference in `docs/API.md`
+- **Data Model**: Database schema and entity relationships in `docs/DATA_MODEL.md`
+- **Service Architecture**: Detailed service layer design in `docs/SERVICE_ARCHITECTURE.md`
 - **Configuration**: All available configuration options
 
 ## License
@@ -311,4 +403,4 @@ This project is designed for a 2-week enhancement sprint to add:
 
 ---
 
-**Status**: Production-ready Reddit integration, YouTube integration operational, ready for sentiment analysis and PostgreSQL migration.
+**Status**: Production-ready Reddit and YouTube integration with PostgreSQL database, Redis support configured, ready for sentiment analysis and cloud deployment.

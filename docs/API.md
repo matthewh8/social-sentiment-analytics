@@ -383,9 +383,17 @@ GET /api/posts/test
 The system uses the following configuration structure:
 
 ```properties
-# Database (H2 for development)
-spring.datasource.url=jdbc:h2:mem:socialsentiment
-spring.jpa.hibernate.ddl-auto=create-drop
+# PostgreSQL Database (Production)
+spring.datasource.url=jdbc:postgresql://localhost:5433/socialsentiment
+spring.datasource.username=postgres
+spring.datasource.password=password123
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.jpa.hibernate.ddl-auto=update
+
+# Redis Configuration
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+spring.data.redis.timeout=2000ms
 
 # Reddit API
 reddit.api.base-url=https://www.reddit.com
@@ -453,25 +461,21 @@ Both Reddit and YouTube posts are stored in a unified `social_posts` table with 
 
 ### Complete Workflow Test
 
-#### 1. Check Both Services
+#### 1. Check All Services
 ```bash
-# Reddit health
+# Service health checks
 curl -X GET "http://localhost:8080/api/reddit/health"
-
-# YouTube health  
 curl -X GET "http://localhost:8080/api/youtube/health"
-
-# Data processing health
 curl -X GET "http://localhost:8080/api/posts/health"
+
+# Database connectivity (via Docker)
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment -c "SELECT COUNT(*) FROM social_posts;"
 ```
 
 #### 2. Trigger Ingestion
 ```bash
 # Reddit ingestion
 curl -X POST "http://localhost:8080/api/reddit/ingest?subreddits=technology,programming&postsPerSubreddit=25"
-
-# YouTube channel ingestion
-curl -X POST "http://localhost:8080/api/youtube/ingest/channel/UCBJycsmduvYEL83R_U4JriQ?limit=25"
 
 # YouTube search ingestion
 curl -X POST "http://localhost:8080/api/youtube/ingest/search" \
@@ -481,18 +485,27 @@ curl -X POST "http://localhost:8080/api/youtube/ingest/search" \
 
 #### 3. Monitor Statistics
 ```bash
-# Reddit stats
+# Platform statistics
 curl -X GET "http://localhost:8080/api/reddit/stats"
-
-# YouTube stats
 curl -X GET "http://localhost:8080/api/youtube/stats"
 ```
 
 ### Development Database Access
-- **H2 Console**: http://localhost:8080/h2-console
-- **JDBC URL**: `jdbc:h2:mem:socialsentiment`
-- **Username**: `sa`
-- **Password**: (empty)
+**PostgreSQL Console**: 
+```bash
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment
+```
+
+**Database Details**:
+- **Host**: localhost:5433
+- **Database**: socialsentiment
+- **Username**: postgres
+- **Password**: password123
+
+**Redis Console**:
+```bash
+docker exec -it socialsentiment-redis redis-cli
+```
 
 ## API Architecture Notes
 
@@ -513,7 +526,7 @@ curl -X GET "http://localhost:8080/api/youtube/stats"
 3. **API Client** → Makes reactive HTTP calls with rate limiting
 4. **Data Conversion** → Maps platform models to unified SocialPost entity
 5. **Duplicate Filtering** → Prevents redundant storage
-6. **Batch Save** → Efficient database operations
+6. **PostgreSQL Storage** → Efficient database operations with proper indexing
 7. **Statistics Update** → Session counters for monitoring
 
 ### YouTube API Integration
@@ -558,6 +571,8 @@ public class YouTubeApiConfig {
 ### Completed Features
 - ✅ Reddit API integration with rate limiting
 - ✅ YouTube API integration with dual WebClient setup
+- ✅ PostgreSQL database with Docker containerization
+- ✅ Redis configuration ready for caching
 - ✅ Unified data model for both platforms
 - ✅ Reactive programming with WebFlux
 - ✅ Duplicate detection and filtering
@@ -565,16 +580,26 @@ public class YouTubeApiConfig {
 - ✅ Comprehensive error handling
 - ✅ Health check endpoints
 - ✅ Statistics tracking
-- ✅ H2 database integration
+- ✅ Production-ready database schema
 
 ### Ready for Enhancement
 - 🚧 Sentiment analysis integration (data model ready)
-- 🚧 PostgreSQL migration (configuration classes ready)
-- 🚧 Redis caching (WebClient configuration supports it)
+- 🚧 Redis caching implementation (configuration complete)
 - 🚧 Advanced search API (DTOs implemented)
 - 🚧 Analytics reporting (data structures defined)
+- 🚧 AWS deployment (Docker containers ready)
 
 ## Required Setup
+
+### Docker Services
+Start required database services:
+```bash
+docker compose up -d
+```
+
+This starts:
+- PostgreSQL on port 5433 (avoiding conflict with system PostgreSQL)
+- Redis on port 6379
 
 ### YouTube API Key
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
@@ -590,7 +615,8 @@ public class YouTubeApiConfig {
 The system comes with working defaults:
 - **Reddit**: Fetches from technology, programming, worldnews, AskReddit subreddits
 - **YouTube**: Configured for major tech channels (MKBHD, Linus Tech Tips)
+- **PostgreSQL**: Production database with proper indexing
+- **Redis**: Ready for caching implementation
 - **Rate Limiting**: Conservative limits to prevent API quota issues
-- **Database**: H2 in-memory for development (auto-creates schema)
 
-This system is production-ready for the core ingestion functionality and designed for easy extension to PostgreSQL, Redis caching, and sentiment analysis.
+This system is production-ready for the core ingestion functionality and designed for easy extension to cloud deployment, Redis caching, and sentiment analysis.
