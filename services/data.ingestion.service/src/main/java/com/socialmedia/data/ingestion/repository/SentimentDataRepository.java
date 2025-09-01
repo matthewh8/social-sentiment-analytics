@@ -3,7 +3,7 @@ package com.socialmedia.data.ingestion.repository;
 import com.socialmedia.data.ingestion.model.Platform;
 import com.socialmedia.data.ingestion.model.SentimentData;
 import com.socialmedia.data.ingestion.model.SentimentLabel;
-import com.socialmedia.data.ingestion.model.SocialPost;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,12 +14,13 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Enhanced sentiment repository for MVP with additional controller support methods
+ * Repository for SentimentData entities with analytics capabilities
+ * for sentiment trends, platform comparisons, and author sentiment profiles.
  */
 @Repository
 public interface SentimentDataRepository extends JpaRepository<SentimentData, Long> {
     
-    // ===== EXISTING METHODS (KEEP ALL YOUR CURRENT METHODS) =====
+    // ===== BASIC QUERIES =====
     
     /**
      * Find sentiment data by social post ID
@@ -31,10 +32,17 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
      */
     @Query("SELECT sd FROM SentimentData sd JOIN sd.socialPost sp " +
            "WHERE sp.externalId = :externalId AND sp.platform = :platform")
-    Optional<SentimentData> findByPostExternalIdAndPlatform(@Param("externalId") String externalId,
+    Optional<SentimentData> findByPostExternalIdAndPlatform(@Param("externalId") String externalId, 
                                                            @Param("platform") Platform platform);
     
     // ===== PLATFORM SENTIMENT ANALYTICS =====
+    
+    /**
+     * Get average sentiment by platform
+     */
+    @Query("SELECT AVG(sd.overallSentiment) FROM SentimentData sd " +
+           "JOIN sd.socialPost sp WHERE sp.platform = :platform")
+    Double getAverageSentimentByPlatform(@Param("platform") Platform platform);
     
     /**
      * Get sentiment distribution for a platform
@@ -45,19 +53,144 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
     List<Object[]> getSentimentDistributionByPlatform(@Param("platform") Platform platform);
     
     /**
-     * Get average sentiment score by platform
+     * Get sentiment statistics for a platform
      */
-    @Query("SELECT AVG(sd.sentimentScore) FROM SentimentData sd " +
+    @Query("SELECT " +
+           "AVG(sd.overallSentiment) as avgSentiment, " +
+           "MAX(sd.overallSentiment) as maxSentiment, " +
+           "MIN(sd.overallSentiment) as minSentiment, " +
+           "AVG(sd.confidenceScore) as avgConfidence, " +
+           "COUNT(sd) as totalAnalyzed " +
+           "FROM SentimentData sd " +
            "JOIN sd.socialPost sp WHERE sp.platform = :platform")
-    Double getAverageSentimentByPlatform(@Param("platform") Platform platform);
+    Object[] getSentimentStatsByPlatform(@Param("platform") Platform platform);
     
-    // ===== CROSS-PLATFORM COMPARISON =====
+    // ===== TIME-BASED SENTIMENT ANALYSIS =====
     
     /**
-     * Compare sentiment across platforms (simplified)
+     * Get sentiment trends over time for a platform
+     */
+    @Query("SELECT DATE(sd.processedAt) as date, " +
+           "AVG(sd.overallSentiment) as avgSentiment, " +
+           "COUNT(sd) as count " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE sp.platform = :platform AND sd.processedAt BETWEEN :start AND :end " +
+           "GROUP BY DATE(sd.processedAt) " +
+           "ORDER BY date")
+    List<Object[]> getSentimentTrends(@Param("platform") Platform platform,
+                                     @Param("start") LocalDateTime start,
+                                     @Param("end") LocalDateTime end);
+    
+    /**
+     * Find posts with extreme sentiment (very positive or negative)
+     */
+    @Query("SELECT sd FROM SentimentData sd " +
+           "WHERE ABS(sd.overallSentiment) > :threshold " +
+           "ORDER BY ABS(sd.overallSentiment) DESC")
+    List<SentimentData> findExtremeSentiment(@Param("threshold") Double threshold, Pageable pageable);
+    
+    /**
+     * Get hourly sentiment distribution
+     */
+    @Query("SELECT HOUR(sp.createdAt) as hour, AVG(sd.overallSentiment) as avgSentiment " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE sp.platform = :platform AND sp.createdAt > :since " +
+           "GROUP BY HOUR(sp.createdAt) " +
+           "ORDER BY hour")
+    List<Object[]> getHourlySentimentDistribution(@Param("platform") Platform platform, 
+                                                 @Param("since") LocalDateTime since);
+    
+    // ===== AUTHOR SENTIMENT PROFILES =====
+    
+    /**
+     * Get author sentiment profiles
+     */
+    @Query("SELECT sp.author, " +
+           "AVG(sd.overallSentiment) as avgSentiment, " +
+           "COUNT(sd) as postCount, " +
+           "AVG(sd.confidenceScore) as avgConfidence " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "GROUP BY sp.author " +
+           "HAVING COUNT(sd) > :minPosts " +
+           "ORDER BY avgSentiment DESC")
+    List<Object[]> getAuthorSentimentProfiles(@Param("minPosts") Long minPosts);
+    
+    /**
+     * Find most positive authors by platform
+     */
+    @Query("SELECT sp.author, AVG(sd.overallSentiment) as avgSentiment, COUNT(sd) as postCount " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE sp.platform = :platform " +
+           "GROUP BY sp.author " +
+           "HAVING COUNT(sd) > :minPosts AND AVG(sd.overallSentiment) > 0.3 " +
+           "ORDER BY avgSentiment DESC")
+    List<Object[]> getMostPositiveAuthors(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
+    
+    /**
+     * Find most negative authors by platform
+     */
+    @Query("SELECT sp.author, AVG(sd.overallSentiment) as avgSentiment, COUNT(sd) as postCount " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE sp.platform = :platform " +
+           "GROUP BY sp.author " +
+           "HAVING COUNT(sd) > :minPosts AND AVG(sd.overallSentiment) < -0.3 " +
+           "ORDER BY avgSentiment ASC")
+    List<Object[]> getMostNegativeAuthors(@Param("platform") Platform platform, @Param("minPosts") Long minPosts);
+    
+    // ===== CONTENT SENTIMENT ANALYSIS =====
+    
+    /**
+     * Find sentiment by keyword in content
+     */
+    @Query("SELECT AVG(sd.overallSentiment), COUNT(sd) " +
+           "FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE LOWER(sp.content) LIKE LOWER(CONCAT('%', :keyword, '%'))")
+    Object[] getSentimentForKeyword(@Param("keyword") String keyword);
+    
+    /**
+     * Find posts with specific sentiment label and high confidence
+     */
+    @Query("SELECT sd FROM SentimentData sd " +
+           "WHERE sd.sentimentLabel = :label AND sd.confidenceScore > :minConfidence " +
+           "ORDER BY sd.confidenceScore DESC")
+    List<SentimentData> findHighConfidenceSentiment(@Param("label") SentimentLabel label, 
+                                                   @Param("minConfidence") Double minConfidence, 
+                                                   Pageable pageable);
+    
+    // ===== QUALITY METRICS =====
+    
+    /**
+     * Get sentiment analysis quality metrics
+     */
+    @Query("SELECT " +
+           "AVG(sd.confidenceScore) as avgConfidence, " +
+           "COUNT(CASE WHEN sd.confidenceScore > 0.8 THEN 1 END) as highConfidenceCount, " +
+           "COUNT(CASE WHEN sd.confidenceScore < 0.5 THEN 1 END) as lowConfidenceCount, " +
+           "COUNT(sd) as totalAnalyzed " +
+           "FROM SentimentData sd")
+    Object[] getQualityMetrics();
+    
+    /**
+     * Find posts that need re-analysis (low confidence)
+     */
+    @Query("SELECT sd FROM SentimentData sd " +
+           "WHERE sd.confidenceScore < :threshold " +
+           "ORDER BY sd.processedAt ASC")
+    List<SentimentData> findLowConfidenceAnalysis(@Param("threshold") Double threshold, Pageable pageable);
+    
+    // ===== CROSS-PLATFORM COMPARISONS =====
+    
+    /**
+     * Compare sentiment across platforms
      */
     @Query("SELECT sp.platform, " +
-           "AVG(sd.sentimentScore) as avgSentiment, " +
+           "AVG(sd.overallSentiment) as avgSentiment, " +
            "COUNT(sd) as count, " +
            "SUM(CASE WHEN sd.sentimentLabel = 'POSITIVE' THEN 1 ELSE 0 END) as positiveCount, " +
            "SUM(CASE WHEN sd.sentimentLabel = 'NEGATIVE' THEN 1 ELSE 0 END) as negativeCount " +
@@ -67,13 +200,13 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
            "GROUP BY sp.platform")
     List<Object[]> getCrossPlatformSentimentComparison(@Param("since") LocalDateTime since);
     
-    // ===== REDDIT-SPECIFIC =====
+    // ===== REDDIT-SPECIFIC SENTIMENT ANALYSIS =====
     
     /**
      * Get sentiment by subreddit
      */
     @Query("SELECT sp.subreddit, " +
-           "AVG(sd.sentimentScore) as avgSentiment, " +
+           "AVG(sd.overallSentiment) as avgSentiment, " +
            "COUNT(sd) as postCount " +
            "FROM SentimentData sd " +
            "JOIN sd.socialPost sp " +
@@ -83,7 +216,7 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
            "ORDER BY avgSentiment DESC")
     List<Object[]> getSentimentBySubreddit(@Param("minPosts") Long minPosts);
     
-    // ===== ENGAGEMENT vs SENTIMENT =====
+    // ===== ENGAGEMENT vs SENTIMENT CORRELATION =====
     
     /**
      * Analyze correlation between sentiment and engagement
@@ -97,53 +230,29 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
            "GROUP BY sd.sentimentLabel")
     List<Object[]> getSentimentEngagementCorrelation(@Param("platform") Platform platform);
     
-    // ===== NEW METHODS FOR CONTROLLER SUPPORT =====
+    /**
+     * Find high engagement posts with specific sentiment
+     */
+    @Query("SELECT sd FROM SentimentData sd " +
+           "JOIN sd.socialPost sp " +
+           "WHERE sd.sentimentLabel = :sentiment AND sp.engagementScore > :minEngagement " +
+           "ORDER BY sp.engagementScore DESC")
+    List<SentimentData> findHighEngagementBySentiment(@Param("sentiment") SentimentLabel sentiment,
+                                                     @Param("minEngagement") Double minEngagement,
+                                                     Pageable pageable);
+    
+    // ===== PROCESSING STATISTICS =====
     
     /**
-     * Count by sentiment label (for stats endpoint)
+     * Get processing performance metrics
      */
-    long countBySentimentLabel(SentimentLabel sentimentLabel);
-    
-    /**
-     * Count recent sentiments (for stats endpoint)
-     */
-    long countByProcessedAtAfter(LocalDateTime date);
-    
-    /**
-     * Get sentiment breakdown by platform (for breakdown endpoint)
-     * Returns: platform, sentiment_label, count
-     */
-    @Query("SELECT sp.platform, sd.sentimentLabel, COUNT(sd) " +
-           "FROM SentimentData sd JOIN sd.socialPost sp " +
-           "GROUP BY sp.platform, sd.sentimentLabel " +
-           "ORDER BY sp.platform, sd.sentimentLabel")
-    List<Object[]> getSentimentBreakdown();
-    
-    /**
-     * Find posts without sentiment analysis (for processing endpoint)
-     */
-    @Query("SELECT sp FROM SocialPost sp WHERE sp.id NOT IN " +
-           "(SELECT sd.socialPost.id FROM SentimentData sd WHERE sd.socialPost.id IS NOT NULL)")
-    List<SocialPost> findPostsWithoutSentiment();
-    
-    /**
-     * Get recent sentiment trends (last 7 days by day)
-     */
-    @Query("SELECT DATE(sd.processedAt) as processDate, " +
-           "sd.sentimentLabel, " +
-           "COUNT(sd) as dailyCount " +
+    @Query("SELECT " +
+           "AVG(sd.processingTimeMs) as avgProcessingTime, " +
+           "MAX(sd.processingTimeMs) as maxProcessingTime, " +
+           "COUNT(sd) as totalProcessed, " +
+           "sd.algorithmUsed " +
            "FROM SentimentData sd " +
-           "WHERE sd.processedAt >= :since " +
-           "GROUP BY DATE(sd.processedAt), sd.sentimentLabel " +
-           "ORDER BY processDate DESC, sd.sentimentLabel")
-    List<Object[]> getRecentSentimentTrends(@Param("since") LocalDateTime since);
-    
-    /**
-     * Get top positive/negative posts by sentiment score
-     */
-    @Query("SELECT sp.title, sp.externalId, sp.platform, sd.sentimentScore, sd.sentimentLabel " +
-           "FROM SentimentData sd JOIN sd.socialPost sp " +
-           "WHERE sd.sentimentLabel = :label " +
-           "ORDER BY sd.sentimentScore DESC")
-    List<Object[]> getTopPostsBySentiment(@Param("label") SentimentLabel label);
+           "WHERE sd.processedAt > :since " +
+           "GROUP BY sd.algorithmUsed")
+    List<Object[]> getProcessingPerformanceMetrics(@Param("since") LocalDateTime since);
 }
