@@ -3,6 +3,7 @@ package com.socialmedia.data.ingestion.repository;
 import com.socialmedia.data.ingestion.model.Platform;
 import com.socialmedia.data.ingestion.model.SentimentData;
 import com.socialmedia.data.ingestion.model.SentimentLabel;
+import com.socialmedia.data.ingestion.model.SocialPost;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,14 +14,12 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Simplified sentiment repository for MVP
- * Removed: complex analytics, author profiles, processing metrics
- * Kept: basic sentiment queries, platform comparisons
+ * Enhanced sentiment repository for MVP with additional controller support methods
  */
 @Repository
 public interface SentimentDataRepository extends JpaRepository<SentimentData, Long> {
     
-    // ===== BASIC QUERIES =====
+    // ===== EXISTING METHODS (KEEP ALL YOUR CURRENT METHODS) =====
     
     /**
      * Find sentiment data by social post ID
@@ -32,7 +31,7 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
      */
     @Query("SELECT sd FROM SentimentData sd JOIN sd.socialPost sp " +
            "WHERE sp.externalId = :externalId AND sp.platform = :platform")
-    Optional<SentimentData> findByPostExternalIdAndPlatform(@Param("externalId") String externalId, 
+    Optional<SentimentData> findByPostExternalIdAndPlatform(@Param("externalId") String externalId,
                                                            @Param("platform") Platform platform);
     
     // ===== PLATFORM SENTIMENT ANALYTICS =====
@@ -97,4 +96,54 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
            "WHERE sp.platform = :platform " +
            "GROUP BY sd.sentimentLabel")
     List<Object[]> getSentimentEngagementCorrelation(@Param("platform") Platform platform);
+    
+    // ===== NEW METHODS FOR CONTROLLER SUPPORT =====
+    
+    /**
+     * Count by sentiment label (for stats endpoint)
+     */
+    long countBySentimentLabel(SentimentLabel sentimentLabel);
+    
+    /**
+     * Count recent sentiments (for stats endpoint)
+     */
+    long countByProcessedAtAfter(LocalDateTime date);
+    
+    /**
+     * Get sentiment breakdown by platform (for breakdown endpoint)
+     * Returns: platform, sentiment_label, count
+     */
+    @Query("SELECT sp.platform, sd.sentimentLabel, COUNT(sd) " +
+           "FROM SentimentData sd JOIN sd.socialPost sp " +
+           "GROUP BY sp.platform, sd.sentimentLabel " +
+           "ORDER BY sp.platform, sd.sentimentLabel")
+    List<Object[]> getSentimentBreakdown();
+    
+    /**
+     * Find posts without sentiment analysis (for processing endpoint)
+     */
+    @Query("SELECT sp FROM SocialPost sp WHERE sp.id NOT IN " +
+           "(SELECT sd.socialPost.id FROM SentimentData sd WHERE sd.socialPost.id IS NOT NULL)")
+    List<SocialPost> findPostsWithoutSentiment();
+    
+    /**
+     * Get recent sentiment trends (last 7 days by day)
+     */
+    @Query("SELECT DATE(sd.processedAt) as processDate, " +
+           "sd.sentimentLabel, " +
+           "COUNT(sd) as dailyCount " +
+           "FROM SentimentData sd " +
+           "WHERE sd.processedAt >= :since " +
+           "GROUP BY DATE(sd.processedAt), sd.sentimentLabel " +
+           "ORDER BY processDate DESC, sd.sentimentLabel")
+    List<Object[]> getRecentSentimentTrends(@Param("since") LocalDateTime since);
+    
+    /**
+     * Get top positive/negative posts by sentiment score
+     */
+    @Query("SELECT sp.title, sp.externalId, sp.platform, sd.sentimentScore, sd.sentimentLabel " +
+           "FROM SentimentData sd JOIN sd.socialPost sp " +
+           "WHERE sd.sentimentLabel = :label " +
+           "ORDER BY sd.sentimentScore DESC")
+    List<Object[]> getTopPostsBySentiment(@Param("label") SentimentLabel label);
 }

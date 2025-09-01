@@ -38,12 +38,15 @@ public class RedditIngestionService {
     @Autowired(required = false) // Optional - works without Redis
     private RedisCacheService cacheService;
     
+    @Autowired(required = false) // Optional - works without sentiment analysis
+    private SentimentAnalysisService sentimentAnalysisService;
+    
     private final AtomicInteger sessionCounter = new AtomicInteger(0);
     
-    // ===== ENHANCED METHODS WITH REDIS CACHING =====
+    // ===== ENHANCED METHODS WITH REDIS CACHING AND SENTIMENT =====
     
     /**
-     * Ingest from subreddit (enhanced with caching)
+     * Ingest from subreddit (enhanced with caching and sentiment analysis)
      */
     public Mono<Integer> ingestFromSubreddit(String subreddit, int limit) {
         String cacheKey = "subreddit:" + subreddit + ":" + limit;
@@ -77,7 +80,7 @@ public class RedditIngestionService {
                     }
                 }
                 
-                return processRedditPosts(redditPosts);
+                return processRedditPostsWithSentiment(redditPosts);
             })
             .doOnSuccess(count -> {
                 logger.info("Ingested {} new posts from r/{}", count, subreddit);
@@ -148,16 +151,16 @@ public class RedditIngestionService {
                 .filter(post -> post.getCreatedAt() != null && post.getCreatedAt().isAfter(oneDayAgo))
                 .count();
             
-            Map<String, Object> stats = Map.of(
-                "status", "healthy",
-                "statistics", Map.of(
-                    "totalPosts", totalPosts != null ? totalPosts : 0L,
-                    "redditPosts", totalRedditPosts,
-                    "recentPosts24h", recentRedditPosts,
-                    "sessionTotal", sessionCounter.get()
-                ),
-                "timestamp", System.currentTimeMillis()
-            );
+            Map<String, Object> statisticsMap = new java.util.HashMap<>();
+            statisticsMap.put("totalPosts", totalPosts != null ? totalPosts : 0L);
+            statisticsMap.put("redditPosts", totalRedditPosts);
+            statisticsMap.put("recentPosts24h", recentRedditPosts);
+            statisticsMap.put("sessionTotal", sessionCounter.get());
+            
+            Map<String, Object> stats = new java.util.HashMap<>();
+            stats.put("status", "healthy");
+            stats.put("statistics", statisticsMap);
+            stats.put("timestamp", System.currentTimeMillis());
             
             // Cache the statistics (if Redis available)
             if (cacheService != null && cacheService.isRedisAvailable()) {
@@ -179,12 +182,12 @@ public class RedditIngestionService {
     public Mono<Map<String, Object>> triggerManualIngestion(List<String> subreddits, int postsPerSubreddit) {
         return ingestFromMultipleSubreddits(subreddits, postsPerSubreddit)
             .map(totalPosts -> {
-                Map<String, Object> response = Map.of(
-                    "status", "success",
-                    "message", "Ingestion completed",
-                    "postsIngested", totalPosts,
-                    "subreddits", subreddits
-                );
+                Map<String, Object> response = new java.util.HashMap<>();
+                response.put("status", "success");
+                response.put("message", "Ingestion completed");
+                response.put("postsIngested", totalPosts);
+                response.put("subreddits", subreddits);
+                response.put("sentimentAnalysis", sentimentAnalysisService != null ? "enabled" : "disabled");
                 
                 logger.info("Manual ingestion completed: {} posts from subreddits: {}", 
                     totalPosts, String.join(", ", subreddits));
@@ -193,19 +196,70 @@ public class RedditIngestionService {
             })
             .onErrorResume(error -> {
                 logger.error("Manual ingestion failed: {}", error.getMessage());
-                return Mono.just(Map.of(
-                    "status", "error",
-                    "message", "Ingestion failed: " + error.getMessage(),
-                    "postsIngested", 0,
-                    "subreddits", subreddits
-                ));
+                Map<String, Object> errorResponse = new java.util.HashMap<>();
+                errorResponse.put("status", "error");
+                errorResponse.put("message", "Ingestion failed: " + error.getMessage());
+                errorResponse.put("postsIngested", 0);
+                errorResponse.put("subreddits", subreddits);
+                return Mono.just(errorResponse);
             });
     }
     
-    // ===== UTILITY METHODS =====
+    // ===== UTILITY METHODS (ENHANCED WITH SENTIMENT) =====
     
     /**
-     * Process Reddit posts with duplicate filtering and database storage
+     * Process Reddit posts with duplicate filtering, database storage, and sentiment analysis
+     */
+    private Mono<Integer> processRedditPostsWithSentiment(List<RedditPost> redditPosts) {
+        return Mono.fromCallable(() -> {
+            List<SocialPost> socialPosts = redditPosts.stream()
+                .map(this::convertToSocialPost)
+                .collect(Collectors.toList());
+            
+            // Filter duplicates using your existing repository method
+            List<SocialPost> newPosts = socialPosts.stream()
+                .filter(post -> !socialPostRepository.existsByExternalIdAndPlatform(
+                    post.getExternalId(), post.getPlatform()))
+                .collect(Collectors.toList());
+            
+            if (newPosts.isEmpty()) {
+                logger.debug("No new unique posts to save");
+                return 0;
+            }
+            
+            // Save posts first
+            List<SocialPost> savedPosts = socialPostRepository.saveAll(newPosts);
+            int savedCount = savedPosts.size();
+            sessionCounter.addAndGet(savedCount);
+            
+            // Trigger async sentiment analysis for saved posts (if service available)
+            if (sentimentAnalysisService != null) {
+                logger.info("Triggering sentiment analysis for {} new posts", savedCount);
+                savedPosts.forEach(post -> {
+                    sentimentAnalysisService.analyzeSentimentAsync(post)
+                        .thenAccept(sentiment -> {
+                            logger.debug("Sentiment analyzed for post {}: {} (score: {}, confidence: {})", 
+                                       post.getId(), 
+                                       sentiment.getSentimentLabel(), 
+                                       sentiment.getSentimentScore(),
+                                       sentiment.getConfidence());
+                        })
+                        .exceptionally(error -> {
+                            logger.warn("Sentiment analysis failed for post {}: {}", 
+                                      post.getId(), error.getMessage());
+                            return null;
+                        });
+                });
+            } else {
+                logger.debug("Sentiment analysis service not available - posts saved without sentiment");
+            }
+            
+            return savedCount;
+        });
+    }
+    
+    /**
+     * Process Reddit posts with duplicate filtering and database storage (original method)
      */
     private Mono<Integer> processRedditPosts(List<RedditPost> redditPosts) {
         return Mono.fromCallable(() -> {
@@ -283,5 +337,53 @@ public class RedditIngestionService {
     public void resetSessionCounter() {
         sessionCounter.set(0);
         logger.info("Reset Reddit ingestion session counter");
+    }
+    
+    // ===== SENTIMENT INTEGRATION HELPERS =====
+    
+    /**
+     * Process sentiment for existing posts without sentiment
+     */
+    public Mono<Map<String, Object>> processSentimentForExistingPosts() {
+        if (sentimentAnalysisService == null) {
+            Map<String, Object> errorResponse = new java.util.HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", "Sentiment analysis service not available");
+            return Mono.just(errorResponse);
+        }
+        
+        return sentimentAnalysisService.processPendingSentiments()
+            .map(processedCount -> {
+                Map<String, Object> response = new java.util.HashMap<>();
+                response.put("status", "success");
+                response.put("message", "Sentiment processing completed for existing posts");
+                response.put("processedCount", processedCount);
+                return response;
+            })
+            .onErrorResume(error -> {
+                Map<String, Object> errorResponse = new java.util.HashMap<>();
+                errorResponse.put("status", "error");
+                errorResponse.put("message", "Sentiment processing failed: " + error.getMessage());
+                errorResponse.put("processedCount", 0);
+                return Mono.just(errorResponse);
+            });
+    }
+    
+    /**
+     * Get sentiment-enhanced statistics
+     */
+    public Mono<Map<String, Object>> getSentimentEnhancedStats() {
+        return getIngestionStats()
+            .map(basicStats -> {
+                if (sentimentAnalysisService == null) {
+                    return basicStats;
+                }
+                
+                // Add sentiment status to basic stats
+                Map<String, Object> enhancedStats = new java.util.HashMap<>(basicStats);
+                enhancedStats.put("sentimentAnalysisEnabled", true);
+                
+                return enhancedStats;
+            });
     }
 }
