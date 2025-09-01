@@ -89,7 +89,7 @@ Thumbs.db
 .dockerignore
 
 # AWS
-/aws
+aws
 
 # Logs
 logs/

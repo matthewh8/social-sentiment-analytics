@@ -1,37 +1,17 @@
 # API Documentation
 
-## Base URLs
-
-**AWS Production**: `http://3.140.252.197:8080/api` (Live deployment)  
-**Local Development**: `http://localhost:8080/api`
-
-## Performance Overview
-
-**AWS Production Performance**: 97% response time improvement (458ms→12ms) with ElastiCache Redis  
-**Cache Strategy**: Cache-aside pattern with automatic invalidation on AWS  
-**Load Tested**: 10+ concurrent requests verified on production AWS infrastructure  
-**Cache TTL**: 5min stats, 10min API responses, 20min search results
-
-## Production Deployment Status
-
-**Infrastructure**: AWS EC2 + RDS PostgreSQL + ElastiCache Redis  
-**Security**: VPC isolation, SSL encryption, security groups with least privilege  
-**Scalability**: Production-ready with connection pooling and managed services  
-**Monitoring**: CloudWatch integration with real-time metrics
-
-## Reddit Ingestion API (AWS Production Enhanced)
-
-### Health Check
-Get the health status of the Reddit ingestion service including AWS cache status.
-
-**AWS Production**:
-```http
-GET http://3.140.252.197:8080/api/reddit/health
+## Base URL
+```
+http://localhost:8080/api
 ```
 
-**Local Development**:
+## Reddit Ingestion API
+
+### Health Check
+Get the health status of the Reddit ingestion service.
+
 ```http
-GET http://localhost:8080/api/reddit/health
+GET /api/reddit/health
 ```
 
 **Response**:
@@ -39,29 +19,19 @@ GET http://localhost:8080/api/reddit/health
 {
   "status": "UP",
   "service": "Reddit Data Ingestion",
-  "caching": {
-    "enabled": true,
-    "available": true
-  },
   "timestamp": "1692345600000"
 }
 ```
 
 **Status Codes**:
-- `200` - Service is healthy (AWS ElastiCache and RDS operational)
+- `200` - Service is healthy
 - `503` - Service is down
 
-### Manual Ingestion Trigger (AWS Cache-Invalidating)
-Manually trigger Reddit post ingestion with automatic AWS ElastiCache invalidation.
+### Manual Ingestion Trigger
+Manually trigger Reddit post ingestion from specified subreddits.
 
-**AWS Production**:
 ```http
-POST http://3.140.252.197:8080/api/reddit/ingest
-```
-
-**Local Development**:
-```http
-POST http://localhost:8080/api/reddit/ingest
+POST /api/reddit/ingest
 ```
 
 **Query Parameters**:
@@ -70,18 +40,16 @@ POST http://localhost:8080/api/reddit/ingest
 | `subreddits` | string | `technology,programming` | Comma-separated list of subreddit names |
 | `postsPerSubreddit` | integer | `25` | Number of posts to fetch per subreddit |
 
-**Cache Behavior**: Automatically invalidates ElastiCache statistics caches after successful ingestion
-
 **Example Requests**:
 ```bash
-# AWS Production ingestion with cache invalidation
-curl -X POST "http://3.140.252.197:8080/api/reddit/ingest"
-
-# Local development
+# Basic ingestion
 curl -X POST "http://localhost:8080/api/reddit/ingest"
 
-# Custom subreddits on AWS
-curl -X POST "http://3.140.252.197:8080/api/reddit/ingest?subreddits=technology,programming,MachineLearning&postsPerSubreddit=50"
+# Custom subreddits
+curl -X POST "http://localhost:8080/api/reddit/ingest?subreddits=technology,programming,MachineLearning&postsPerSubreddit=50"
+
+# Single subreddit with custom limit
+curl -X POST "http://localhost:8080/api/reddit/ingest?subreddits=AskReddit&postsPerSubreddit=10"
 ```
 
 **Success Response** (`200`):
@@ -90,17 +58,23 @@ curl -X POST "http://3.140.252.197:8080/api/reddit/ingest?subreddits=technology,
   "status": "success",
   "message": "Ingestion completed",
   "postsIngested": 75,
-  "subreddits": ["technology", "programming", "MachineLearning"],
-  "environment": "aws"
+  "subreddits": ["technology", "programming", "MachineLearning"]
+}
+```
+
+**Error Response** (`500`):
+```json
+{
+  "status": "error",
+  "message": "Ingestion failed"
 }
 ```
 
 ### Trending Posts Ingestion
-Ingest trending posts from r/popular with AWS cache invalidation.
+Ingest trending posts from r/popular.
 
-**AWS Production**:
 ```http
-POST http://3.140.252.197:8080/api/reddit/trending
+POST /api/reddit/trending
 ```
 
 **Query Parameters**:
@@ -108,12 +82,9 @@ POST http://3.140.252.197:8080/api/reddit/trending
 |-----------|------|---------|-------------|
 | `limit` | integer | `50` | Number of trending posts to fetch |
 
-**Cache Behavior**: Invalidates all AWS ElastiCache statistics caches after ingestion
-
 **Example Request**:
 ```bash
-# AWS Production trending ingestion
-curl -X POST "http://3.140.252.197:8080/api/reddit/trending?limit=25"
+curl -X POST "http://localhost:8080/api/reddit/trending?limit=25"
 ```
 
 **Success Response** (`200`):
@@ -121,24 +92,16 @@ curl -X POST "http://3.140.252.197:8080/api/reddit/trending?limit=25"
 {
   "status": "success",
   "message": "Trending posts ingestion completed",
-  "postsIngested": 25,
-  "source": "r/popular",
-  "environment": "aws"
+  "postsIngested": 25
 }
 ```
 
-### System Statistics (AWS ElastiCache Cached)
-Get comprehensive statistics with AWS ElastiCache Redis caching for optimal performance.
+### System Statistics
+Get comprehensive statistics about the ingestion system.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/reddit/stats
+GET /api/reddit/stats
 ```
-
-**Cache Details**:
-- **TTL**: 5 minutes on AWS ElastiCache
-- **Performance**: 12-14ms cached response from internet vs 458ms RDS query
-- **Invalidation**: Automatic after any ingestion operation
 
 **Response** (`200`):
 ```json
@@ -150,107 +113,41 @@ GET http://3.140.252.197:8080/api/reddit/stats
     "recentPosts24h": 156,
     "sessionTotal": 75
   },
-  "timestamp": 1692345600000,
-  "cacheStatus": "hit",
-  "environment": "aws"
+  "timestamp": 1692345600000
 }
 ```
 
-**Performance Testing**:
-```bash
-# Test AWS ElastiCache performance
-time curl http://3.140.252.197:8080/api/reddit/stats  # Cache miss: ~458ms
-time curl http://3.140.252.197:8080/api/reddit/stats  # Cache hit: ~12ms
-
-# Test local cache performance
-time curl http://localhost:8080/api/reddit/stats  # Local Redis performance
-```
+**Field Descriptions**:
+- `totalPosts`: Total posts in the database
+- `redditPosts`: Total Reddit posts ingested
+- `recentPosts24h`: Posts ingested in the last 24 hours
+- `sessionTotal`: Posts ingested in the current session
 
 ### Service Configuration
-Get current service configuration including AWS cache settings.
+Get current service configuration information.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/reddit/config
+GET /api/reddit/config
 ```
 
 **Response** (`200`):
 ```json
 {
-  "schedulingEnabled": false,
-  "schedulingInterval": "Manual",
+  "schedulingEnabled": true,
+  "schedulingInterval": "5 minutes",
   "rateLimitEnabled": true,
   "retryEnabled": true,
-  "maxRetries": 2,
-  "cachingEnabled": true,
-  "cacheProvider": "AWS ElastiCache Redis",
-  "defaultSubreddits": ["technology", "programming", "worldnews"],
-  "requestsPerMinute": 60,
-  "environment": "aws",
-  "database": "AWS RDS PostgreSQL"
+  "maxRetries": 3
 }
 ```
 
-### Cache Management Endpoints (AWS ElastiCache)
-
-#### Cache Health Check
-Monitor AWS ElastiCache Redis status and performance.
-
-**AWS Production**:
-```http
-GET http://3.140.252.197:8080/api/reddit/cache/health
-```
-
-**Response** (`200`):
-```json
-{
-  "status": "success",
-  "cacheHealth": {
-    "connected": true,
-    "provider": "AWS ElastiCache",
-    "keysCount": 3,
-    "statsKeyExists": true,
-    "sslEnabled": true,
-    "lastCheck": "2025-08-31T12:34:56"
-  },
-  "timestamp": 1692345600000
-}
-```
-
-#### Manual Cache Clearing
-Clear all Reddit-related AWS ElastiCache entries.
-
-**AWS Production**:
-```http
-DELETE http://3.140.252.197:8080/api/reddit/cache
-```
-
-**Response** (`200`):
-```json
-{
-  "status": "success",
-  "message": "AWS ElastiCache Redis caches cleared successfully",
-  "timestamp": 1692345600000
-}
-```
-
-**If ElastiCache Unavailable**:
-```json
-{
-  "status": "info", 
-  "message": "AWS ElastiCache not available - no caches to clear",
-  "timestamp": 1692345600000
-}
-```
-
-## YouTube Ingestion API (AWS Production Ready)
+## YouTube Ingestion API
 
 ### Health Check
 Get the health status of the YouTube ingestion service.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/youtube/health
+GET /api/youtube/health
 ```
 
 **Response**:
@@ -258,17 +155,15 @@ GET http://3.140.252.197:8080/api/youtube/health
 {
   "status": "UP",
   "service": "YouTube Data Ingestion",
-  "timestamp": "1692345600000",
-  "environment": "aws"
+  "timestamp": "1692345600000"
 }
 ```
 
 ### Channel-Based Ingestion
 Manually trigger YouTube video ingestion from a specific channel.
 
-**AWS Production**:
 ```http
-POST http://3.140.252.197:8080/api/youtube/ingest/channel/{channelId}
+POST /api/youtube/ingest/channel/{channelId}
 ```
 
 **Path Parameters**:
@@ -281,16 +176,52 @@ POST http://3.140.252.197:8080/api/youtube/ingest/channel/{channelId}
 
 **Example Request**:
 ```bash
-# AWS Production channel ingestion
-curl -X POST "http://3.140.252.197:8080/api/youtube/ingest/channel/UCBJycsmduvYEL83R_U4JriQ?limit=30"
+curl -X POST "http://localhost:8080/api/youtube/ingest/channel/UCBJycsmduvYEL83R_U4JriQ?limit=30"
+```
+
+**Success Response** (`200`):
+```json
+{
+  "status": "success",
+  "message": "Channel ingestion completed",
+  "videosIngested": 30,
+  "channelId": "UCBJycsmduvYEL83R_U4JriQ"
+}
+```
+
+### Multi-Channel Ingestion
+Trigger ingestion from multiple channels simultaneously.
+
+```http
+POST /api/youtube/ingest
+```
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `channels` | string | `UCBJycsmduvYEL83R_U4JriQ,UCXuqSBlHAE6Xw-yeJA0Tunw` | Comma-separated channel IDs |
+| `videosPerChannel` | integer | `25` | Number of videos to fetch per channel |
+
+**Example Request**:
+```bash
+curl -X POST "http://localhost:8080/api/youtube/ingest?channels=UCBJycsmduvYEL83R_U4JriQ,UCXuqSBlHAE6Xw-yeJA0Tunw&videosPerChannel=20"
+```
+
+**Success Response** (`200`):
+```json
+{
+  "status": "success",
+  "message": "Ingestion completed",
+  "videosIngested": 40,
+  "channels": ["UCBJycsmduvYEL83R_U4JriQ", "UCXuqSBlHAE6Xw-yeJA0Tunw"]
+}
 ```
 
 ### Search-Based Ingestion
 Trigger ingestion based on YouTube search queries.
 
-**AWS Production**:
 ```http
-POST http://3.140.252.197:8080/api/youtube/ingest/search
+POST /api/youtube/ingest/search
 ```
 
 **Request Body**:
@@ -303,18 +234,52 @@ POST http://3.140.252.197:8080/api/youtube/ingest/search
 
 **Example Request**:
 ```bash
-# AWS Production search ingestion
-curl -X POST "http://3.140.252.197:8080/api/youtube/ingest/search" \
+curl -X POST "http://localhost:8080/api/youtube/ingest/search" \
   -H "Content-Type: application/json" \
   -d '{"query": "machine learning", "limit": 30}'
+```
+
+**Success Response** (`200`):
+```json
+{
+  "status": "success",
+  "message": "Search ingestion completed",
+  "videosIngested": 25,
+  "query": "artificial intelligence"
+}
+```
+
+### Trending Videos Ingestion
+Ingest trending videos from YouTube's trending section.
+
+```http
+POST /api/youtube/trending
+```
+
+**Query Parameters**:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `50` | Number of trending videos to fetch |
+
+**Example Request**:
+```bash
+curl -X POST "http://localhost:8080/api/youtube/trending?limit=25"
+```
+
+**Success Response** (`200`):
+```json
+{
+  "status": "success",
+  "message": "Trending videos ingestion completed",
+  "videosIngested": 25
+}
 ```
 
 ### YouTube System Statistics
 Get comprehensive statistics about the YouTube ingestion system.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/youtube/stats
+GET /api/youtube/stats
 ```
 
 **Response** (`200`):
@@ -327,19 +292,42 @@ GET http://3.140.252.197:8080/api/youtube/stats
     "recentPosts24h": 89,
     "sessionTotal": 25
   },
-  "timestamp": 1692345600000,
-  "environment": "aws"
+  "timestamp": 1692345600000
 }
 ```
 
-## Data Processing API (AWS RDS Integration)
+**Field Descriptions**:
+- `totalPosts`: Total posts across all platforms in the database
+- `youtubePosts`: Total YouTube videos ingested
+- `recentPosts24h`: YouTube videos ingested in the last 24 hours
+- `sessionTotal`: YouTube videos ingested in the current session
+
+### YouTube Service Configuration
+Get current YouTube service configuration information.
+
+```http
+GET /api/youtube/config
+```
+
+**Response** (`200`):
+```json
+{
+  "schedulingEnabled": true,
+  "schedulingInterval": "5 minutes",
+  "rateLimitEnabled": true,
+  "retryEnabled": true,
+  "maxRetries": 3,
+  "quotaLimitPerDay": 10000
+}
+```
+
+## Data Processing API
 
 ### Health Check
 Get the health status of the data processing service.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/posts/health
+GET /api/posts/health
 ```
 
 **Response**:
@@ -347,7 +335,6 @@ GET http://3.140.252.197:8080/api/posts/health
 {
   "status": "UP",
   "service": "Data Processing Service",
-  "database": "AWS RDS PostgreSQL",
   "timestamp": "1692345600000"
 }
 ```
@@ -355,91 +342,58 @@ GET http://3.140.252.197:8080/api/posts/health
 ### Test Endpoint
 Simple connectivity test for the data processing service.
 
-**AWS Production**:
 ```http
-GET http://3.140.252.197:8080/api/posts/test
+GET /api/posts/test
 ```
 
 **Response**:
 ```json
 {
   "message": "Data Processing Controller is working!",
-  "availableEndpoints": "POST /api/posts, GET /api/posts/health, GET /api/posts/test",
-  "environment": "aws"
+  "availableEndpoints": "POST /api/posts, GET /api/posts/health, GET /api/posts/test"
 }
 ```
 
-## Cache Performance Analysis (AWS Production)
-
-### Response Time Measurements (AWS ElastiCache)
-| Operation | RDS Query | ElastiCache Hit | Improvement | Internet Latency |
-|-----------|-----------|-----------------|-------------|------------------|
-| `/api/reddit/stats` | 458ms | 12-14ms | 97% faster | < 100ms end-to-end |
-| `/api/reddit/health` | 25ms | 15ms | 40% faster | < 50ms |
-| Concurrent 10 requests | Variable | Consistent 12-14ms | Stable under load | < 100ms |
-
-### AWS ElastiCache Key Distribution
-```bash
-# Inspect AWS production cache utilization
-# Note: Direct Redis access not available in managed ElastiCache
-# Use application endpoints instead:
-
-curl http://3.140.252.197:8080/api/reddit/cache/health  # Check cache status
-curl http://3.140.252.197:8080/api/reddit/stats         # Test cache performance
-```
-
-### Load Testing Results (AWS Production Verified)
-```bash
-# Concurrent request performance on AWS
-for i in {1..10}; do curl -s http://3.140.252.197:8080/api/reddit/stats > /dev/null & done; wait
-# Result: All 10 requests completed successfully with consistent ElastiCache performance
-# No timeouts, errors, or performance degradation under concurrent load
-```
-
-## Platform Support (AWS Production Status)
+## Platform Support
 
 ### Current Implementation Status
-| Platform | Status | AWS Caching Support | Features Available |
-|----------|--------|--------------------|--------------------|
-| Reddit | ✅ Production Deployed | ✅ ElastiCache Integration | Manual ingestion, trending posts, cached statistics |
-| YouTube | ✅ Production Deployed | 🚧 Ready for ElastiCache | Channel ingestion, search ingestion, trending videos |
+| Platform | Status | Features Available |
+|----------|--------|-------------------|
+| Reddit | ✅ Fully Implemented | Manual ingestion, trending posts, statistics |
+| YouTube | ✅ Fully Implemented | Channel ingestion, search ingestion, trending videos |
 
-### Platform-Specific Features (AWS Enhanced)
+### Platform-Specific Features
 
-#### Reddit Features (AWS ElastiCache-Enhanced)
-- Subreddit-based ingestion with AWS cache invalidation
-- Trending posts from r/popular with RDS persistence
-- **ElastiCache statistics**: 5-minute TTL for optimal performance
-- **API response caching**: 10-minute TTL reduces external API calls
-- Upvote and comment tracking (no downvotes in 2025) with AWS persistence
+#### Reddit Features
+- Subreddit-based ingestion
+- Trending posts from r/popular
+- Upvote and comment tracking
+- No downvotes (deprecated in 2025)
 
-#### YouTube Features (AWS RDS Ready)
-- Channel-based ingestion using channel IDs with RDS storage
-- Search-based ingestion with queries and AWS persistence
+#### YouTube Features  
+- Channel-based ingestion using channel IDs
+- Search-based ingestion with queries
 - Trending videos from Science & Technology category
-- Like count, view count, and comment tracking with RDS
+- Like count, view count, and comment tracking
 - Proper handling of YouTube's two-step API process (search → video details)
 
-## Configuration (AWS Production)
+## Configuration
 
-### AWS Production Properties
+### Application Properties
+The system uses the following configuration structure:
+
 ```properties
-# AWS RDS PostgreSQL (Production)
-spring.datasource.url=jdbc:postgresql://socialsentiment-db.cx64ikumk10n.us-east-2.rds.amazonaws.com:5432/socialsentiment
+# PostgreSQL Database (Production)
+spring.datasource.url=jdbc:postgresql://localhost:5433/socialsentiment
 spring.datasource.username=postgres
-spring.datasource.password=SocialSentiment2025!
+spring.datasource.password=password123
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.jpa.hibernate.ddl-auto=update
 
-# AWS ElastiCache Redis Configuration (Production Performance Layer)
-spring.data.redis.host=clustercfg.socialsentiment-redis-cache.kobbva.use2.cache.amazonaws.com
+# Redis Configuration
+spring.data.redis.host=localhost
 spring.data.redis.port=6379
-spring.data.redis.ssl.enabled=true
-spring.data.redis.timeout=5000ms
-spring.cache.type=redis
-
-# Redis Connection Pool (AWS Production Settings)
-spring.data.redis.lettuce.pool.max-active=20
-spring.data.redis.lettuce.pool.max-idle=8
-spring.data.redis.lettuce.pool.min-idle=2
+spring.data.redis.timeout=2000ms
 
 # Reddit API
 reddit.api.base-url=https://www.reddit.com
@@ -452,251 +406,217 @@ youtube.api.base-url=https://www.googleapis.com/youtube/v3
 youtube.api.api-key=YOUR_API_KEY_HERE
 youtube.api.requests-per-second=100
 youtube.api.quota-units-per-day=10000
+youtube.api.default-channels=UCBJycsmduvYEL83R_U4JriQ,UCXuqSBlHAE6Xw-yeJA0Tunw
+youtube.api.default-search-terms=technology,programming,artificial intelligence
 ```
 
-### Local Development Properties
-```properties
-# PostgreSQL Database (Local Docker)
-spring.datasource.url=jdbc:postgresql://localhost:5433/socialsentiment
-spring.datasource.username=postgres
-spring.datasource.password=password123
+### Rate Limiting
+- **Reddit API**: 60 requests per minute (token bucket algorithm)
+- **YouTube API**: 100 requests per second, 10,000 quota units per day
+- **Shared Rate Limiter**: Uses AtomicInteger-based token bucket implementation
 
-# Redis Configuration (Local Docker)
-spring.data.redis.host=localhost
-spring.data.redis.port=6379
-spring.data.redis.timeout=2000ms
-```
+## Data Model
 
-### Cache TTL Strategy (AWS ElastiCache)
-- **Statistics Cache**: 5 minutes (balance between freshness and performance)
-- **API Response Cache**: 10 minutes (reduces external API calls)
-- **Search Results Cache**: 20 minutes (search patterns often repeat)
-- **Analytics Reports**: 30 minutes (complex calculations benefit from longer cache)
+### SocialPost Entity Structure
+Both Reddit and YouTube posts are stored in a unified `social_posts` table with platform-specific fields:
 
-## Error Handling (AWS Enhanced)
+#### Common Fields (Both Platforms)
+- `id`: Auto-generated primary key
+- `external_id`: Platform-specific post/video ID
+- `platform`: REDDIT or YOUTUBE
+- `title`: Post/video title (both platforms have titles in 2025)
+- `content`: Post content/video description
+- `author`: Username/channel name
+- `created_at`: Original publication timestamp
+- `comment_count`: Number of comments
+- `engagement_score`: Calculated engagement metric
 
-### AWS-Aware Error Responses
+#### Reddit-Specific Fields
+- `upvotes`: Reddit upvotes (no downvotes as of 2025)
+- `subreddit`: Subreddit name without "r/" prefix
+
+#### YouTube-Specific Fields
+- `video_id`: YouTube video ID
+- `like_count`: YouTube like count
+- `view_count`: YouTube view count
+
+## Error Handling
+
+### Standard Error Response Format
 ```json
 {
   "status": "error",
-  "message": "Descriptive error message",
-  "cacheStatus": "available|unavailable",
-  "fallbackUsed": true|false,
-  "environment": "aws",
-  "services": {
-    "rds": "available",
-    "elasticache": "available"
-  }
+  "message": "Descriptive error message"
 }
 ```
 
-### Common Error Scenarios (AWS Enhanced)
+### Common Error Scenarios
 - **Rate Limited** (429): API quota exceeded
-- **ElastiCache Unavailable**: Falls back to RDS with degraded performance
-- **Cache Timeout**: Automatic fallback to RDS query
 - **Invalid API Key** (403): YouTube API authentication failure
-- **Duplicate Posts**: Handled gracefully with RDS PostgreSQL constraints
-- **RDS Connection Issues**: Proper error handling with retry logic
+- **Network Timeout**: Connection/read timeout exceeded
+- **Duplicate Posts**: Handled gracefully with filtering
+- **Invalid Response**: Empty or malformed API responses
 
-## Testing Examples (AWS Production)
+## Testing Examples
 
-### AWS Cache Performance Verification
+### Complete Workflow Test
 
-#### 1. Production Performance Testing
+#### 1. Check All Services
 ```bash
-# Test AWS ElastiCache performance improvement
-echo "AWS Cache Performance Test:"
+# Service health checks
+curl -X GET "http://localhost:8080/api/reddit/health"
+curl -X GET "http://localhost:8080/api/youtube/health"
+curl -X GET "http://localhost:8080/api/posts/health"
 
-# Cache miss (first call)
-echo "Cache miss:"
-time curl http://3.140.252.197:8080/api/reddit/stats
-
-# Cache hit (subsequent calls)  
-echo "Cache hit:"
-time curl http://3.140.252.197:8080/api/reddit/stats
-time curl http://3.140.252.197:8080/api/reddit/stats
-
-# Expected Results on AWS:
-# Cache miss: ~458ms (RDS query)
-# Cache hit: ~12-14ms (ElastiCache lookup)
+# Database connectivity (via Docker)
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment -c "SELECT COUNT(*) FROM social_posts;"
 ```
 
-#### 2. AWS Load Testing
+#### 2. Trigger Ingestion
 ```bash
-# Concurrent request handling on AWS production
-echo "AWS Load Testing:"
-for i in {1..10}; do
-  curl -s http://3.140.252.197:8080/api/reddit/stats > /dev/null &
-done
-wait
-echo "All 10 concurrent AWS requests completed"
+# Reddit ingestion
+curl -X POST "http://localhost:8080/api/reddit/ingest?subreddits=technology,programming&postsPerSubreddit=25"
 
-# Expected: All requests complete successfully with consistent ElastiCache performance
-```
-
-#### 3. AWS Cache Invalidation Testing
-```bash
-# Test AWS cache invalidation flow
-echo "AWS Cache Invalidation Test:"
-
-# 1. Populate ElastiCache
-curl http://3.140.252.197:8080/api/reddit/stats
-
-# 2. Trigger ingestion (invalidates AWS cache)
-curl -X POST "http://3.140.252.197:8080/api/reddit/ingest?subreddits=technology&postsPerSubreddit=5"
-
-# 3. Verify fresh data (ElastiCache repopulated)
-curl http://3.140.252.197:8080/api/reddit/stats
-```
-
-#### 4. AWS ElastiCache Health Monitoring
-```bash
-# Monitor AWS ElastiCache through application endpoints
-curl http://3.140.252.197:8080/api/reddit/cache/health | jq
-
-# Expected response includes AWS ElastiCache status
-# Note: Direct Redis CLI access not available in managed ElastiCache
-```
-
-### Complete AWS Workflow Test
-
-#### Production Workflow (AWS)
-```bash
-# 1. Check AWS service and cache health
-curl http://3.140.252.197:8080/api/reddit/health | jq '.caching'
-curl http://3.140.252.197:8080/api/reddit/cache/health
-
-# 2. Trigger fresh ingestion with AWS cache invalidation
-curl -X POST "http://3.140.252.197:8080/api/reddit/trending?limit=10"
-
-# 3. Verify statistics are updated and cached on AWS
-curl http://3.140.252.197:8080/api/reddit/stats | jq '.statistics'
-
-# 4. Test AWS ElastiCache hit performance
-time curl -s http://3.140.252.197:8080/api/reddit/stats > /dev/null  # Should be ~12ms
-time curl -s http://3.140.252.197:8080/api/reddit/stats > /dev/null  # Should be ~12ms
-
-# 5. YouTube integration test on AWS
-curl -X POST "http://3.140.252.197:8080/api/youtube/ingest/search" \
+# YouTube search ingestion
+curl -X POST "http://localhost:8080/api/youtube/ingest/search" \
   -H "Content-Type: application/json" \
-  -d '{"query": "programming", "limit": 10}'
-
-curl http://3.140.252.197:8080/api/youtube/stats | jq '.statistics'
+  -d '{"query": "programming tutorial", "limit": 20}'
 ```
 
-## Implementation Status (AWS Production)
-
-### Completed Features (AWS Deployed & Verified)
-- ✅ Reddit API integration with AWS ElastiCache caching (97% performance improvement)
-- ✅ YouTube API integration with AWS RDS persistence
-- ✅ AWS RDS PostgreSQL database with production indexing
-- ✅ AWS ElastiCache Redis caching with SSL and automatic invalidation
-- ✅ Unified data model for both platforms on AWS
-- ✅ Reactive programming with WebFlux on EC2
-- ✅ Duplicate detection and filtering with RDS constraints
-- ✅ Engagement score calculation with AWS persistence
-- ✅ Comprehensive error handling with AWS service fallback
-- ✅ Health check endpoints with AWS service status
-- ✅ Statistics tracking with ElastiCache optimization
-- ✅ Load testing verified on AWS production (10+ concurrent requests)
-- ✅ Multi-environment configuration (local Docker + AWS)
-- ✅ Production security with VPC, security groups, and SSL
-
-### Ready for Enhancement (Week 1 Target)
-- 🚧 Sentiment analysis integration with AWS RDS persistence
-- 🚧 YouTube caching implementation with ElastiCache
-- 🚧 Advanced search API with AWS caching
-- 🚧 Analytics reporting with ElastiCache optimization
-- 🚧 CloudWatch monitoring integration
-
-### Week 2 Frontend Development
-- 📋 React dashboard connecting to AWS API endpoints
-- 📋 Real-time data visualization with AWS performance
-- 📋 WebSocket integration for live updates from production
-- 📋 Mobile-responsive design with AWS API integration
-
-## AWS Cache Architecture Benefits (Production Verified)
-
-### Performance Improvements (AWS Measured)
-- **RDS Database Query Time**: 458ms average
-- **ElastiCache Redis Hit Time**: 12-14ms average  
-- **Performance Gain**: 97% reduction in response time
-- **Internet End-to-End**: < 100ms for cached endpoints
-- **Concurrent Performance**: Stable under 10+ simultaneous requests from internet
-
-### AWS Scalability Benefits
-- **Reduced RDS Load**: Cache hits don't query PostgreSQL
-- **Improved User Experience**: Sub-15ms response times for cached data from internet
-- **Cost Efficiency**: Fewer RDS connections and queries with managed ElastiCache
-- **Production Ready**: Graceful degradation when ElastiCache unavailable
-- **AWS Native**: Integrated with CloudWatch monitoring and auto-scaling ready
-
-### AWS Cache Management Features
-- **Automatic Invalidation**: Cache cleared after data ingestion
-- **Health Monitoring**: Real-time ElastiCache status endpoints
-- **SSL Encryption**: Secure data transmission in AWS
-- **Managed Service**: AWS handles Redis maintenance and updates
-- **TTL Strategy**: Different expiration times based on data volatility
-
-## Required Setup (Multi-Environment)
-
-### AWS Production (Live)
-Services already deployed and accessible:
-- **Application**: http://3.140.252.197:8080/api
-- **RDS**: PostgreSQL 16.9 (managed service)
-- **ElastiCache**: Redis 7.x with SSL (managed service)
-
-### Local Development Setup
+#### 3. Monitor Statistics
 ```bash
-# Start local Docker services
-docker compose up -d
-
-# This starts:
-# - PostgreSQL on port 5433 (development database)
-# - Redis on port 6379 (development caching)
-
-# Verify local services
-docker exec -it socialsentiment-redis redis-cli ping
-# Expected: PONG
+# Platform statistics
+curl -X GET "http://localhost:8080/api/reddit/stats"
+curl -X GET "http://localhost:8080/api/youtube/stats"
 ```
 
-### YouTube API Key Setup
+### Development Database Access
+**PostgreSQL Console**: 
+```bash
+docker exec -it socialsentiment-postgres psql -U postgres -d socialsentiment
+```
+
+**Database Details**:
+- **Host**: localhost:5433
+- **Database**: socialsentiment
+- **Username**: postgres
+- **Password**: password123
+
+**Redis Console**:
+```bash
+docker exec -it socialsentiment-redis redis-cli
+```
+
+## API Architecture Notes
+
+### Reactive Programming
+- All ingestion services use **Spring WebFlux** with Mono/Flux patterns
+- Non-blocking I/O for external API calls
+- Proper backpressure handling with rate limiting
+
+### Error Handling Strategy
+- **Graceful Degradation**: Individual failures don't stop batch processing
+- **Simple Retry**: 2 retries for transient failures
+- **Rate Limit Respect**: Token bucket algorithm prevents API quota issues
+- **Duplicate Prevention**: Checks `external_id + platform` uniqueness
+
+### Data Flow
+1. **API Request** → Controller validates parameters
+2. **Service Layer** → Orchestrates ingestion workflow
+3. **API Client** → Makes reactive HTTP calls with rate limiting
+4. **Data Conversion** → Maps platform models to unified SocialPost entity
+5. **Duplicate Filtering** → Prevents redundant storage
+6. **PostgreSQL Storage** → Efficient database operations with proper indexing
+7. **Statistics Update** → Session counters for monitoring
+
+### YouTube API Integration
+- **Two-Step Process**: Search API → Video Details API
+- **Proper ID Handling**: Handles both search response (`id.videoId`) and video response (`id`) formats
+- **Statistics Fetching**: Gets engagement metrics (views, likes, comments)
+- **Channel Support**: Fetch latest videos from specific channels
+- **Search Support**: Query-based video discovery
+
+## Configuration Classes
+
+### RedditApiConfig
+```java
+@ConfigurationProperties(prefix = "reddit.api")
+public class RedditApiConfig {
+    private String baseUrl = "https://www.reddit.com";
+    private String userAgent = "SentimentAnalytics/1.0";
+    private int requestsPerMinute = 60;
+    private String[] defaultSubreddits = {"technology", "programming", "worldnews"};
+    // ... other configuration
+}
+```
+
+### YouTubeApiConfig  
+```java
+@ConfigurationProperties(prefix = "youtube.api")
+public class YouTubeApiConfig {
+    private String baseUrl = "https://www.googleapis.com/youtube/v3";
+    private String apiKey; // Required
+    private int requestsPerSecond = 100;
+    private int quotaUnitsPerDay = 10000;
+    private String[] defaultChannels = {
+        "UCBJycsmduvYEL83R_U4JriQ", // MKBHD
+        "UCXuqSBlHAE6Xw-yeJA0Tunw"  // Linus Tech Tips
+    };
+    // ... other configuration
+}
+```
+
+## Implementation Status
+
+### Completed Features
+- ✅ Reddit API integration with rate limiting
+- ✅ YouTube API integration with dual WebClient setup
+- ✅ PostgreSQL database with Docker containerization
+- ✅ Redis configuration ready for caching
+- ✅ Unified data model for both platforms
+- ✅ Reactive programming with WebFlux
+- ✅ Duplicate detection and filtering
+- ✅ Engagement score calculation
+- ✅ Comprehensive error handling
+- ✅ Health check endpoints
+- ✅ Statistics tracking
+- ✅ Production-ready database schema
+
+### Ready for Enhancement
+- 🚧 Sentiment analysis integration (data model ready)
+- 🚧 Redis caching implementation (configuration complete)
+- 🚧 Advanced search API (DTOs implemented)
+- 🚧 Analytics reporting (data structures defined)
+- 🚧 AWS deployment (Docker containers ready)
+
+## Required Setup
+
+### Docker Services
+Start required database services:
+```bash
+docker compose up -d
+```
+
+This starts:
+- PostgreSQL on port 5433 (avoiding conflict with system PostgreSQL)
+- Redis on port 6379
+
+### YouTube API Key
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing
 3. Enable YouTube Data API v3
 4. Create credentials (API Key)
-5. Update configuration files:
+5. Update `application.properties`:
    ```properties
-   # Local: src/main/resources/application.properties
-   # AWS: src/main/resources/application-aws.properties
    youtube.api.api-key=YOUR_ACTUAL_API_KEY_HERE
    ```
 
-## AWS Production Deployment Considerations
+### Default Configuration
+The system comes with working defaults:
+- **Reddit**: Fetches from technology, programming, worldnews, AskReddit subreddits
+- **YouTube**: Configured for major tech channels (MKBHD, Linus Tech Tips)
+- **PostgreSQL**: Production database with proper indexing
+- **Redis**: Ready for caching implementation
+- **Rate Limiting**: Conservative limits to prevent API quota issues
 
-### AWS ElastiCache vs Local Redis
-```properties
-# AWS Production (SSL enabled, managed service)
-spring.data.redis.host=clustercfg.socialsentiment-redis-cache.kobbva.use2.cache.amazonaws.com
-spring.data.redis.port=6379
-spring.data.redis.ssl.enabled=true
-
-# Local Development (Docker container)
-spring.data.redis.host=localhost
-spring.data.redis.port=6379
-spring.data.redis.ssl.enabled=false
-```
-
-### AWS Monitoring Integration
-- **CloudWatch Metrics**: ElastiCache hit/miss ratios and response times
-- **Performance Monitoring**: RDS query performance vs cache response time tracking
-- **Error Alerting**: ElastiCache connection failures and cache degradation
-- **Cost Monitoring**: Free tier usage tracking and billing alerts
-
-### AWS Security Implementation
-- **VPC Isolation**: RDS and ElastiCache in private subnets
-- **Security Groups**: Least privilege access with specific port rules
-- **SSL/TLS**: Encryption in transit for all data
-- **IAM**: Proper role-based access control
-
-This enhanced AWS production API documentation reflects the complete deployment with ElastiCache Redis caching, RDS PostgreSQL persistence, and verified performance improvements across internet connectivity - demonstrating production-ready cloud architecture suitable for technical interviews and real-world usage.
+This system is production-ready for the core ingestion functionality and designed for easy extension to cloud deployment, Redis caching, and sentiment analysis.
