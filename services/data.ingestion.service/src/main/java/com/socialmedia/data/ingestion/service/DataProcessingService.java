@@ -36,6 +36,9 @@ public class DataProcessingService {
     private SentimentDataRepository sentimentDataRepository;
     
     @Autowired
+    private StanfordSentimentService sentimentService;
+    
+    @Autowired
     private Validator validator;
     
     // Configuration constants
@@ -44,7 +47,7 @@ public class DataProcessingService {
     private static final int MAX_SEARCH_RESULTS = 1000;
     
     /**
-     * Save a new social post with comprehensive validation and duplicate detection
+     * Save a social post WITH automatic sentiment analysis
      */
     public SocialPostDto saveSocialPost(SocialPostDto postDto) {
         logger.info("Processing new social post from platform: {}", postDto.getPlatform());
@@ -67,40 +70,133 @@ public class DataProcessingService {
         // Extract and process content features
         processContentFeatures(entity);
         
-        // Save to database
+        // Save to database FIRST
         SocialPost savedEntity = socialPostRepository.save(entity);
         logger.info("Successfully saved social post with ID: {}", savedEntity.getId());
         
+        // THEN analyze sentiment asynchronously
+        try {
+            sentimentService.analyzeSentiment(savedEntity);
+            logger.debug("Triggered sentiment analysis for post: {}", savedEntity.getId());
+        } catch (Exception e) {
+            logger.warn("Failed to trigger sentiment analysis for post {}: {}", savedEntity.getId(), e.getMessage());
+            // Don't fail the entire operation if sentiment analysis fails
+        }
+        
         return convertToDto(savedEntity);
-    }
-    
+    }   
     /**
-     * Batch save multiple social posts with optimized processing
+     * Batch save with sentiment analysis
      */
     public List<SocialPostDto> saveSocialPosts(List<SocialPostDto> postDtos) {
         logger.info("Processing batch of {} social posts", postDtos.size());
         
         List<SocialPostDto> savedPosts = new ArrayList<>();
+        List<SocialPost> postsForSentiment = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         
         for (SocialPostDto postDto : postDtos) {
             try {
-                SocialPostDto saved = saveSocialPost(postDto);
-                savedPosts.add(saved);
+                // Save without sentiment analysis first
+                SocialPost entity = convertToEntity(postDto);
+                entity.setEngagementScore(calculateEngagementScore(entity));
+                processContentFeatures(entity);
+                
+                if (!isDuplicate(postDto)) {
+                    SocialPost saved = socialPostRepository.save(entity);
+                    savedPosts.add(convertToDto(saved));
+                    postsForSentiment.add(saved);
+                }
             } catch (Exception e) {
                 errors.add("Failed to save post " + postDto.getExternalId() + ": " + e.getMessage());
                 logger.error("Error saving post {}: {}", postDto.getExternalId(), e.getMessage());
             }
         }
         
+        // Trigger batch sentiment analysis if we have posts
+        if (!postsForSentiment.isEmpty()) {
+            try {
+                sentimentService.analyzeSentimentBatch(postsForSentiment);
+                logger.info("Triggered batch sentiment analysis for {} posts", postsForSentiment.size());
+            } catch (Exception e) {
+                logger.warn("Failed to trigger batch sentiment analysis: {}", e.getMessage());
+            }
+        }
+        
         if (!errors.isEmpty()) {
-            logger.warn("Batch processing completed with {} errors: {}", errors.size(), errors);
+            logger.warn("Batch processing completed with {} errors", errors.size());
         }
         
         logger.info("Successfully processed {}/{} posts in batch", savedPosts.size(), postDtos.size());
         return savedPosts;
     }
-    
+
+    /**
+     * Process unanalyzed posts for sentiment
+     */
+    public Map<String, Object> processPendingSentimentAnalysis(int batchSize) {
+        logger.info("Processing pending sentiment analysis for up to {} posts", batchSize);
+        
+        try {
+            List<SocialPost> unanalyzedPosts = socialPostRepository.findPostsWithoutSentiment(batchSize);
+            
+            if (unanalyzedPosts.isEmpty()) {
+                return Map.of(
+                    "status", "info",
+                    "message", "No posts found requiring sentiment analysis",
+                    "processed", 0
+                );
+            }
+            
+            // Trigger batch sentiment analysis
+            sentimentService.analyzeSentimentBatch(unanalyzedPosts);
+            
+            return Map.of(
+                "status", "success", 
+                "message", "Batch sentiment analysis started",
+                "processed", unanalyzedPosts.size(),
+                "timestamp", LocalDateTime.now()
+            );
+            
+        } catch (Exception e) {
+            logger.error("Failed to process pending sentiment analysis: {}", e.getMessage());
+            
+            return Map.of(
+                "status", "error",
+                "message", "Failed to process sentiment analysis: " + e.getMessage(),
+                "processed", 0
+            );
+        }
+    }
+
+    /**
+     * Get sentiment analysis progress
+     */
+    public Map<String, Object> getSentimentAnalysisProgress() {
+        try {
+            long totalPosts = socialPostRepository.count();
+            long analyzedPosts = sentimentDataRepository.count();
+            long pendingPosts = totalPosts - analyzedPosts;
+            
+            double completionRate = totalPosts > 0 ? ((double) analyzedPosts / totalPosts) * 100 : 0.0;
+            
+            return Map.of(
+                "totalPosts", totalPosts,
+                "analyzedPosts", analyzedPosts,
+                "pendingPosts", pendingPosts,
+                "completionPercentage", Math.round(completionRate * 100.0) / 100.0,
+                "timestamp", LocalDateTime.now()
+            );
+            
+        } catch (Exception e) {
+            logger.error("Error getting sentiment analysis progress: {}", e.getMessage());
+            
+            return Map.of(
+                "error", "Unable to retrieve progress information",
+                "timestamp", LocalDateTime.now()
+            );
+        }
+    }    
     /**
      * Search social posts with advanced criteria
      */

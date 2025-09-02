@@ -34,6 +34,15 @@ public interface SentimentDataRepository extends JpaRepository<SentimentData, Lo
            "WHERE sp.externalId = :externalId AND sp.platform = :platform")
     Optional<SentimentData> findByPostExternalIdAndPlatform(@Param("externalId") String externalId, 
                                                            @Param("platform") Platform platform);
+
+       /**
+        * Find recent sentiment analysis results
+        * For the recent analysis endpoint
+        */
+       @Query("SELECT sd FROM SentimentData sd " +
+              "ORDER BY sd.processedAt DESC " +
+              "LIMIT 10")
+       List<SentimentData> findTop10ByOrderByProcessedAtDesc();
     
     // ===== PLATFORM SENTIMENT ANALYTICS =====
     

@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.Map;
+import java.time.LocalDateTime;
 
 @RestController
 @RequestMapping("/api/posts")
@@ -65,6 +66,56 @@ public class DataProcessingController {
                 return HttpStatus.NOT_FOUND; // 404
             default:
                 return HttpStatus.INTERNAL_SERVER_ERROR; // 500
+        }
+    }
+    /**
+     * Trigger sentiment analysis for posts without analysis
+     */
+    @PostMapping("/sentiment/process")
+    public ResponseEntity<Map<String, Object>> processPendingSentiment(
+            @RequestParam(defaultValue = "50") int batchSize) {
+        
+        try {
+            Map<String, Object> result = dataProcessingService.processPendingSentimentAnalysis(batchSize);
+            
+            if ("error".equals(result.get("status"))) {
+                return ResponseEntity.status(500).body(result);
+            }
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            logger.error("Failed to trigger sentiment processing: {}", e.getMessage(), e);
+            
+            Map<String, Object> errorResponse = Map.of(
+                "status", "error",
+                "message", "Failed to trigger sentiment processing: " + e.getMessage(),
+                "timestamp", LocalDateTime.now()
+            );
+            
+            return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
+    /**
+     * Get sentiment analysis progress
+     */
+    @GetMapping("/sentiment/progress")
+    public ResponseEntity<Map<String, Object>> getSentimentProgress() {
+        try {
+            Map<String, Object> progress = dataProcessingService.getSentimentAnalysisProgress();
+            return ResponseEntity.ok(progress);
+            
+        } catch (Exception e) {
+            logger.error("Failed to get sentiment progress: {}", e.getMessage(), e);
+            
+            Map<String, Object> errorResponse = Map.of(
+                "status", "error", 
+                "message", "Failed to retrieve progress: " + e.getMessage(),
+                "timestamp", LocalDateTime.now()
+            );
+            
+            return ResponseEntity.status(500).body(errorResponse);
         }
     }
 }

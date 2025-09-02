@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -275,12 +276,33 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
            "WHERE s.createdAt > :since")
     Object[] getVolumeStatistics(@Param("since") LocalDateTime since);
     
-    // ===== SENTIMENT ANALYSIS SUPPORT =====
+    // ===== SENTIMENT ANALYSIS SUPPORT (CORRECTED) =====
     
     /**
-     * Find posts that need sentiment analysis
+     * Find posts that don't have sentiment analysis yet
+     * CORRECTED: Uses proper JOIN to check if sentiment data exists
      */
-    @Query("SELECT s FROM SocialPost s WHERE s.sentimentData IS NULL AND s.content IS NOT NULL ORDER BY s.createdAt DESC")
+    @Query("SELECT sp FROM SocialPost sp " +
+           "WHERE sp.id NOT IN (SELECT sd.socialPost.id FROM SentimentData sd) " +
+           "AND (sp.content IS NOT NULL OR sp.title IS NOT NULL) " +
+           "ORDER BY sp.ingestedAt DESC")
+    List<SocialPost> findPostsWithoutSentiment(Pageable pageable);
+
+    /**
+     * Convenience method for finding posts without sentiment analysis
+     */
+    default List<SocialPost> findPostsWithoutSentiment(int limit) {
+        return findPostsWithoutSentiment(PageRequest.of(0, limit));
+    }
+    
+    /**
+     * Alternative query for posts needing sentiment analysis (more explicit)
+     */
+    @Query("SELECT sp FROM SocialPost sp " +
+           "LEFT JOIN SentimentData sd ON sd.socialPost.id = sp.id " +
+           "WHERE sd.id IS NULL " +
+           "AND (sp.content IS NOT NULL OR sp.title IS NOT NULL) " +
+           "ORDER BY sp.createdAt DESC")
     List<SocialPost> findPostsNeedingSentimentAnalysis(Pageable pageable);
     
     // ===== BATCH OPERATIONS & UPDATES =====
@@ -307,6 +329,7 @@ public interface SocialPostRepository extends JpaRepository<SocialPost, Long> {
     @Modifying
     @Transactional
     @Query("UPDATE SocialPost s SET s.processedAt = CURRENT_TIMESTAMP " +
-           "WHERE s.processedAt IS NULL AND s.sentimentData IS NULL")
+           "WHERE s.processedAt IS NULL " +
+           "AND s.id NOT IN (SELECT sd.socialPost.id FROM SentimentData sd)")
     int markUnprocessedForSentimentAnalysis();
 }
